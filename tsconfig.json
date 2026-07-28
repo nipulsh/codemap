@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["node", "mocha"],
+    "sourceMap": true,
+    "rootDir": ".",
+    "outDir": "out-tsc",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@shared/*": ["./shared/*"]
+    }
+  },
+  "include": ["src/**/*", "shared/**/*", "tests/**/*.ts"],
+  "exclude": [
+    "src/webview/**/*",
+    "tests/fixtures/**",
+    "node_modules",
+    "out"
+  ]
+}

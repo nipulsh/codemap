@@ -1,0 +1,214 @@
+:root {
+  --cm-bg: var(--vscode-editor-background, #1e1e1e);
+  --cm-fg: var(--vscode-editor-foreground, #d4d4d4);
+  --cm-border: var(--vscode-panel-border, #333);
+  --cm-accent: var(--vscode-button-background, #0e639c);
+  --cm-accent-fg: var(--vscode-button-foreground, #fff);
+  --cm-muted: var(--vscode-descriptionForeground, #9d9d9d);
+  --cm-error: var(--vscode-errorForeground, #f44747);
+  --cm-folder: #3a5f7a;
+  --cm-file: #2d4a3e;
+  --cm-cycle: #7a3a3a;
+  --cm-banner-bg: color-mix(in srgb, var(--cm-accent) 18%, transparent);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--cm-bg);
+  color: var(--cm-fg);
+  font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+}
+
+.cm-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.cm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--cm-border);
+  flex-shrink: 0;
+}
+
+.cm-brand {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.cm-btn {
+  background: var(--cm-accent);
+  color: var(--cm-accent-fg);
+  border: none;
+  padding: 4px 10px;
+  border-radius: 2px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.cm-btn:hover {
+  filter: brightness(1.1);
+}
+
+.cm-meta,
+.cm-progress {
+  color: var(--cm-muted);
+  font-size: 12px;
+}
+
+.cm-banner {
+  padding: 6px 12px;
+  background: var(--cm-banner-bg);
+  color: var(--cm-muted);
+  font-size: 12px;
+  border-bottom: 1px solid var(--cm-border);
+  flex-shrink: 0;
+}
+
+.cm-error {
+  padding: 8px 12px;
+  color: var(--cm-error);
+  border-bottom: 1px solid var(--cm-border);
+  flex-shrink: 0;
+}
+
+.cm-main {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.cm-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--cm-muted);
+}
+
+.cm-graph-wrap {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.cm-legend {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.cm-legend-item {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--cm-bg) 80%, transparent);
+  border: 1px solid var(--cm-border);
+}
+
+.cm-legend-imports {
+  border-color: #6cb6ff;
+}
+.cm-legend-dynamic {
+  border-color: #c792ea;
+}
+.cm-legend-exports {
+  border-color: #c3e88d;
+}
+
+.cm-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--cm-border);
+  background: var(--cm-file);
+  color: var(--cm-fg);
+  font-size: 12px;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.cm-folder {
+  background: var(--cm-folder);
+  font-weight: 600;
+}
+
+.cm-cycle {
+  border-color: #e06c75;
+  box-shadow: inset 0 0 0 1px #e06c75;
+}
+
+.cm-node-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cm-node-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.cm-collapse-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  line-height: 1;
+}
+
+.react-flow__edge.cm-edge-imports path {
+  stroke: #6cb6ff;
+}
+
+.react-flow__edge.cm-edge-dynamicImport path {
+  stroke: #c792ea;
+}
+
+.react-flow__edge.cm-edge-exports path {
+  stroke: #c3e88d;
+}
+
+.react-flow__edge.cm-edge-cycle path {
+  stroke: #e06c75 !important;
+  stroke-width: 2;
+}
+
+.react-flow__controls {
+  background: var(--cm-bg);
+  border: 1px solid var(--cm-border);
+}
+
+.react-flow__controls-button {
+  background: var(--cm-bg);
+  border-bottom: 1px solid var(--cm-border);
+  fill: var(--cm-fg);
+}
+
+.react-flow__minimap {
+  background: color-mix(in srgb, var(--cm-bg) 90%, #000);
+}

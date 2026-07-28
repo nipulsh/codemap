@@ -1,0 +1,64 @@
+{
+  "name": "codemap",
+  "displayName": "CodeMap",
+  "description": "Interactive code architecture visualizer for React, Next.js, and TypeScript",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "codemap.openArchitecture",
+        "title": "CodeMap: Open Architecture"
+      },
+      {
+        "command": "codemap.refreshGraph",
+        "title": "CodeMap: Refresh Graph"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.webview.json --noEmit",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src shared tests",
+    "test": "vscode-test",
+    "test:unit": "tsx --test tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "^1.1.4",
+    "@xyflow/react": "^12.6.0",
+    "elkjs": "^0.10.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.8.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.21.0",
+    "mocha": "^11.1.0",
+    "tsx": "^4.19.3",
+    "typescript-eslint": "^8.61.1"
+  },
+  "overrides": {
+    "diff": "^8.0.4",
+    "serialize-javascript": "^7.0.6"
+  }
+}
