@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
 import { join } from 'node:path';
 import { MessageBus } from './messageBus';
-import { scanWorkspace } from '../scanner/workspaceScanner';
 import { WorkerPool } from '../parser/workerPool';
-import { InMemoryDependencyIndex } from '../cache/dependencyIndex';
-import { generateGraph } from '../graph/generator';
+import { ExplorerService } from '../explorer/ExplorerService';
 import { normalizePath } from '../utils/path';
+import { isSourceFile } from '../scanner/ignore';
+import { basename } from 'node:path';
 
 export class ArchitecturePanel {
   public static current: ArchitecturePanel | undefined;
@@ -13,9 +13,10 @@ export class ArchitecturePanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly bus: MessageBus;
   private readonly pool: WorkerPool;
-  private readonly index = new InMemoryDependencyIndex();
+  private readonly explorer: ExplorerService;
   private disposables: vscode.Disposable[] = [];
-  private scanning = false;
+  private watcher: vscode.FileSystemWatcher | undefined;
+  private busy = false;
 
   private constructor(
     panel: vscode.WebviewPanel,
@@ -33,6 +34,24 @@ export class ArchitecturePanel {
       ),
     });
 
+    this.explorer = new ExplorerService(this.pool, (msg) => {
+      if (msg.full) {
+        this.bus.post({ type: 'graph:full', payload: msg.full });
+      }
+      if (msg.patch) {
+        this.bus.post({ type: 'graph:patch', payload: msg.patch });
+      }
+      if (msg.progress && msg.progress.message) {
+        this.bus.post({
+          type: 'progress',
+          payload: msg.progress,
+        });
+      }
+      if (msg.error) {
+        this.bus.post({ type: 'error', payload: msg.error });
+      }
+    });
+
     this.panel.webview.html = this.getHtml();
 
     this.disposables.push(
@@ -41,6 +60,8 @@ export class ArchitecturePanel {
       }),
       this.panel.onDidDispose(() => this.dispose()),
     );
+
+    this.setupWatcher();
   }
 
   static createOrShow(extensionUri: vscode.Uri): ArchitecturePanel {
@@ -69,11 +90,10 @@ export class ArchitecturePanel {
   }
 
   async refresh(): Promise<void> {
-    if (this.scanning) {
+    if (this.busy) {
       return;
     }
-    this.scanning = true;
-
+    this.busy = true;
     try {
       const folders = vscode.workspace.workspaceFolders;
       if (!folders || folders.length === 0) {
@@ -86,67 +106,7 @@ export class ArchitecturePanel {
         });
         return;
       }
-
-      const workspaceRoot = folders[0].uri.fsPath;
-
-      this.bus.post({
-        type: 'progress',
-        payload: { message: 'Scanning workspace…', percent: 5 },
-      });
-
-      const scan = scanWorkspace(workspaceRoot, (message, percent) => {
-        this.bus.post({
-          type: 'progress',
-          payload: { message, percent },
-        });
-      });
-
-      this.bus.post({
-        type: 'progress',
-        payload: {
-          message: `Parsing ${scan.files.length} files…`,
-          percent: 40,
-        },
-      });
-
-      const results = await this.pool.parseFiles({
-        workspaceRoot: scan.workspaceRoot,
-        files: scan.files.map((f) => ({ absolutePath: f.absolutePath })),
-        tsconfigs: scan.tsconfigs,
-      });
-
-      this.index.clear();
-      const byPath = new Map(results.map((r) => [normalizePath(r.filePath), r]));
-
-      for (const file of scan.files) {
-        const parsed = byPath.get(normalizePath(file.absolutePath));
-        this.index.set({
-          absolutePath: file.absolutePath,
-          relativePath: file.relativePath,
-          contentHash: file.contentHash,
-          mtimeMs: file.mtimeMs,
-          imports: parsed?.imports ?? [],
-          exports: parsed?.exports ?? [],
-          dependencyPaths: parsed?.dependencyPaths ?? [],
-          dynamicImportPaths: parsed?.dynamicImportPaths ?? [],
-          parseError: parsed?.error,
-        });
-      }
-
-      this.bus.post({
-        type: 'progress',
-        payload: { message: 'Building graph…', percent: 85 },
-      });
-
-      const snapshot = generateGraph({
-        workspaceRoot: scan.workspaceRoot,
-        files: this.index.all(),
-      });
-
-      this.bus.post({
-        type: 'graph:full',
-        payload: snapshot,
-      });
+      await this.explorer.refresh();
     } catch (err) {
       this.bus.post({
         type: 'error',
@@ -156,35 +116,139 @@ export class ArchitecturePanel {
         },
       });
     } finally {
-      this.scanning = false;
+      this.busy = false;
+    }
+  }
+
+  async bootstrap(): Promise<void> {
+    if (this.busy) {
+      return;
+    }
+    this.busy = true;
+    try {
+      const folders = vscode.workspace.workspaceFolders;
+      if (!folders || folders.length === 0) {
+        this.bus.post({
+          type: 'error',
+          payload: {
+            message: 'No workspace folder open.',
+            scope: 'scanner',
+          },
+        });
+        return;
+      }
+      await this.explorer.bootstrap(folders[0].uri.fsPath);
+    } catch (err) {
+      this.bus.post({
+        type: 'error',
+        payload: {
+          message: err instanceof Error ? err.message : String(err),
+          scope: 'architecture-panel',
+        },
+      });
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private setupWatcher(): void {
+    if (!vscode.workspace.workspaceFolders?.length) {
+      return;
+    }
+    this.watcher = vscode.workspace.createFileSystemWatcher('**/*');
+    const onChange = (uri: vscode.Uri) => {
+      void this.handleFsEvent(uri);
+    };
+    this.watcher.onDidChange(onChange);
+    this.watcher.onDidCreate(onChange);
+    this.watcher.onDidDelete(onChange);
+    this.disposables.push(this.watcher);
+  }
+
+  private async handleFsEvent(uri: vscode.Uri): Promise<void> {
+    const path = normalizePath(uri.fsPath);
+    try {
+      const stat = await vscode.workspace.fs.stat(uri).then(
+        (s) => s,
+        () => undefined,
+      );
+      if (stat?.type === vscode.FileType.Directory) {
+        await this.explorer.onDirectoryChanged(path);
+        return;
+      }
+      // Parent directory listing may need refresh for create/delete
+      const parent = path.includes('/')
+        ? path.slice(0, path.lastIndexOf('/'))
+        : path;
+      if (!stat) {
+        // deleted — invalidate parent folder + file
+        await this.explorer.onFileChanged(path);
+        await this.explorer.onDirectoryChanged(parent);
+        return;
+      }
+      if (isSourceFile(basename(path)) || basename(path).includes('.')) {
+        await this.explorer.onFileChanged(path);
+        await this.explorer.onDirectoryChanged(parent);
+      }
+    } catch {
+      // ignore watcher errors
     }
   }
 
   private async handleWebviewMessage(
     msg: import('../../shared/messages').WebviewToExtension,
   ): Promise<void> {
-    switch (msg.type) {
-      case 'ready':
-      case 'graph:refresh':
-        await this.refresh();
-        break;
-      case 'node:open': {
-        const uri = vscode.Uri.file(msg.payload.filePath);
-        const doc = await vscode.workspace.openTextDocument(uri);
-        const editor = await vscode.window.showTextDocument(doc);
-        if (msg.payload.line !== undefined) {
-          const line = Math.max(0, msg.payload.line - 1);
-          const pos = new vscode.Position(line, 0);
-          editor.selection = new vscode.Selection(pos, pos);
-          editor.revealRange(new vscode.Range(pos, pos));
+    try {
+      switch (msg.type) {
+        case 'ready':
+          await this.bootstrap();
+          break;
+        case 'graph:refresh':
+          await this.refresh();
+          break;
+        case 'folder:expand':
+          await this.explorer.expandFolder(msg.payload.path);
+          break;
+        case 'folder:collapse':
+          await this.explorer.collapseFolder(msg.payload.path);
+          break;
+        case 'file:expand':
+          await this.explorer.expandFile(msg.payload.path);
+          break;
+        case 'file:collapse':
+          await this.explorer.collapseFile(msg.payload.path);
+          break;
+        case 'function:expand':
+          await this.explorer.expandFunction(msg.payload.nodeId);
+          break;
+        case 'function:collapse':
+          await this.explorer.collapseFunction(msg.payload.nodeId);
+          break;
+        case 'node:open': {
+          const uri = vscode.Uri.file(msg.payload.filePath);
+          const doc = await vscode.workspace.openTextDocument(uri);
+          const editor = await vscode.window.showTextDocument(doc);
+          if (msg.payload.line !== undefined) {
+            const line = Math.max(0, msg.payload.line - 1);
+            const pos = new vscode.Position(line, 0);
+            editor.selection = new vscode.Selection(pos, pos);
+            editor.revealRange(new vscode.Range(pos, pos));
+          }
+          break;
         }
-        break;
+        case 'node:select':
+        case 'search:query':
+        case 'filter:update':
+          break;
       }
-      case 'node:select':
-      case 'search:query':
-      case 'filter:update':
-        // Phase 3 — ignore silently (no fake results)
-        break;
+    } catch (err) {
+      this.bus.post({
+        type: 'error',
+        payload: {
+          message: err instanceof Error ? err.message : String(err),
+          scope: 'architecture-panel',
+        },
+      });
     }
   }
 
@@ -217,6 +281,7 @@ export class ArchitecturePanel {
 
   dispose(): void {
     ArchitecturePanel.current = undefined;
+    this.explorer.dispose();
     void this.pool.dispose();
     this.panel.dispose();
     while (this.disposables.length) {

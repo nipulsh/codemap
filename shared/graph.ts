@@ -1,13 +1,23 @@
 import { z } from 'zod';
 
-export const NodeKindSchema = z.enum(['Folder', 'File', 'Function', 'Component']);
+export const NodeKindSchema = z.enum([
+  'Workspace',
+  'Folder',
+  'File',
+  'Function',
+  'Class',
+  'Interface',
+  'Enum',
+  'Component',
+]);
 export type NodeKind = z.infer<typeof NodeKindSchema>;
 
 export const EdgeKindSchema = z.enum([
+  'hierarchy',
+  'contains',
   'imports',
   'exports',
   'calls',
-  'contains',
   'dynamicImport',
 ]);
 export type EdgeKind = z.infer<typeof EdgeKindSchema>;
@@ -66,3 +76,32 @@ export const FilterStateSchema = z.object({
   hideGenerated: z.boolean().default(true),
 });
 export type FilterState = z.infer<typeof FilterStateSchema>;
+
+/** Apply a graph patch onto a snapshot (immutable). Safe for webview + extension. */
+export function applyGraphPatch(
+  snapshot: GraphSnapshot,
+  patch: GraphPatch,
+): GraphSnapshot {
+  const nodeMap = new Map(snapshot.nodes.map((n) => [n.id, n]));
+  const edgeMap = new Map(snapshot.edges.map((e) => [e.id, e]));
+
+  for (const id of patch.removeNodeIds ?? []) {
+    nodeMap.delete(id);
+  }
+  for (const id of patch.removeEdgeIds ?? []) {
+    edgeMap.delete(id);
+  }
+  for (const n of patch.upsertNodes ?? []) {
+    nodeMap.set(n.id, n);
+  }
+  for (const e of patch.upsertEdges ?? []) {
+    edgeMap.set(e.id, e);
+  }
+
+  return {
+    ...snapshot,
+    nodes: [...nodeMap.values()],
+    edges: [...edgeMap.values()],
+    generatedAt: Date.now(),
+  };
+}

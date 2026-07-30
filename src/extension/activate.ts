@@ -5,7 +5,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('codemap.openArchitecture', () => {
       const panel = ArchitecturePanel.createOrShow(context.extensionUri);
-      void panel.refresh();
+      void panel.bootstrap();
     }),
   );
 
@@ -15,7 +15,7 @@ export function activate(context: vscode.ExtensionContext): void {
         void ArchitecturePanel.current.refresh();
       } else {
         const panel = ArchitecturePanel.createOrShow(context.extensionUri);
-        void panel.refresh();
+        void panel.bootstrap();
       }
     }),
   );

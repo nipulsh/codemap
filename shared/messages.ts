@@ -61,6 +61,42 @@ export const WebviewToExtensionSchema = z.discriminatedUnion('type', [
     payload: FilterStateSchema,
   }),
   z.object({
+    type: z.literal('folder:expand'),
+    payload: z.object({
+      path: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal('folder:collapse'),
+    payload: z.object({
+      path: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal('file:expand'),
+    payload: z.object({
+      path: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal('file:collapse'),
+    payload: z.object({
+      path: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal('function:expand'),
+    payload: z.object({
+      nodeId: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal('function:collapse'),
+    payload: z.object({
+      nodeId: z.string(),
+    }),
+  }),
+  z.object({
     type: z.literal('graph:refresh'),
   }),
   z.object({

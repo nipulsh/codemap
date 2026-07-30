@@ -1,18 +1,17 @@
 # CodeMap
 
-Interactive VS Code extension that visualizes a workspace as a folder/file dependency graph (React Flow + ELK).
+Interactive VS Code extension that visualizes a workspace as a progressive architecture explorer (React Flow + ELK).
 
-## Phase 1 (current)
+## Current (incremental explorer)
 
-- Full workspace scan with hardcoded ignores (`node_modules`, `.next`, `dist`, `build`, `coverage`, tests, generated)
-- Folder + file nodes; edges for static imports/exports and dynamic `import()`
-- Barrel re-exports resolved one hop; path aliases via `tsconfig` `paths`
-- Circular dependencies marked in graph metadata
-- Parsing runs in a Node `worker_threads` worker
-- Manual **CodeMap: Open Architecture** / **CodeMap: Refresh Graph** (no file watching yet)
-- Dark-mode webview, pan/zoom/minimap, collapsible folders, double-click file to open
-
-**Not in Phase 1:** live incremental updates, on-disk cache, function/call graph, search, filter UI, deep (ts-morph) mode.
+- **No full-workspace parse on open** — startup lists root folders/files only (&lt;200ms target)
+- Double-click to expand folders → files → symbols → call flow (n8n-style)
+- Ctrl/Cmd+double-click opens the file in the editor
+- Three-layer caches: folder listings, parsed files, function callees
+- File watcher invalidates only changed paths
+- Background prefetch parses visible files after folder expand (low priority)
+- Worker-thread TypeScript parser (imports, exports, symbols, direct calls)
+- Manual **CodeMap: Open Architecture** / **CodeMap: Refresh Graph** (re-explores expanded nodes)
 
 Static analysis only — dynamic dispatch and runtime-only calls are not shown (banner in UI).
 
@@ -34,19 +33,29 @@ npm run typecheck
 ## Architecture
 
 ```
-Extension host → WorkspaceScanner → WorkerPool (TS parser)
-                 → DependencyIndex → GraphGenerator → Webview (React Flow)
+Extension host → ExplorerService → listDirectory / WorkerPool
+                 → FolderCache / FileCache / FunctionCache
+                 → graph:full | graph:patch → Webview (React Flow)
 ```
 
 Shared zod-validated protocol: [`shared/messages.ts`](shared/messages.ts).
+
+## Interaction model
+
+| Action | Effect |
+|--------|--------|
+| Open panel | Workspace + root children only |
+| Double-click folder | Immediate children (cached) |
+| Double-click file | Parse AST → symbols + import stubs |
+| Double-click function | Immediate callees (file stub if target unexpanded) |
+| Expand target file later | Rewire call edges to concrete symbols |
+| Refresh | Re-validate caches for explored paths |
 
 ## Roadmap
 
 | Phase | Focus |
 |-------|--------|
-| 1 | Static folder + file graph (this release) |
-| 2 | File watcher, disk cache, incremental `graph:patch` |
-| 3 | Function/component nodes, call edges, search, filters |
-| 4 | Scale/polish (tooltips, shortcuts, large-repo targets) |
+| Done | Lazy explorer, caches, watcher, prefetch, call edges |
+| Next | Disk cache persistence, search/filter UI, multi-worker pool |
 
 The older multi-phase Next.js plan in `plan.md` is superseded by this roadmap.

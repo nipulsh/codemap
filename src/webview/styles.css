@@ -6,8 +6,14 @@
   --cm-accent-fg: var(--vscode-button-foreground, #fff);
   --cm-muted: var(--vscode-descriptionForeground, #9d9d9d);
   --cm-error: var(--vscode-errorForeground, #f44747);
+  --cm-workspace: #4a5568;
   --cm-folder: #3a5f7a;
   --cm-file: #2d4a3e;
+  --cm-function: #3d5a80;
+  --cm-class: #5c4a7a;
+  --cm-interface: #4a6a5c;
+  --cm-enum: #6a5a3a;
+  --cm-component: #2a6a6a;
   --cm-cycle: #7a3a3a;
   --cm-banner-bg: color-mix(in srgb, var(--cm-accent) 18%, transparent);
 }
@@ -112,7 +118,10 @@ body,
   right: 8px;
   z-index: 5;
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 420px;
+  justify-content: flex-end;
   pointer-events: none;
 }
 
@@ -124,11 +133,23 @@ body,
   border: 1px solid var(--cm-border);
 }
 
+.cm-legend-hierarchy {
+  border-color: #8a8a8a;
+}
+.cm-legend-contains {
+  border-color: #6a6a6a;
+}
+.cm-legend-calls {
+  border-color: #5b9bd5;
+}
 .cm-legend-imports {
-  border-color: #6cb6ff;
+  border-color: #9b59b6;
 }
 .cm-legend-dynamic {
-  border-color: #c792ea;
+  border-color: #f1c40f;
+}
+.cm-legend-async {
+  border-color: #e2a66e;
 }
 .cm-legend-exports {
   border-color: #c3e88d;
@@ -147,11 +168,50 @@ body,
   width: 100%;
   height: 100%;
   overflow: hidden;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.cm-workspace {
+  background: var(--cm-workspace);
+  font-weight: 700;
 }
 
 .cm-folder {
   background: var(--cm-folder);
   font-weight: 600;
+}
+
+.cm-file {
+  background: var(--cm-file);
+}
+
+.cm-function {
+  background: var(--cm-function);
+}
+
+.cm-class {
+  background: var(--cm-class);
+}
+
+.cm-interface {
+  background: var(--cm-interface);
+}
+
+.cm-enum {
+  background: var(--cm-enum);
+}
+
+.cm-component {
+  background: var(--cm-component);
+}
+
+.cm-expanded {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cm-accent) 60%, transparent);
+}
+
+.cm-lazy {
+  opacity: 0.85;
+  border-style: dashed;
 }
 
 .cm-cycle {
@@ -163,39 +223,68 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
 }
 
 .cm-node-icon {
   flex-shrink: 0;
   opacity: 0.85;
+  font-weight: 600;
+  width: 1em;
+  text-align: center;
 }
 
-.cm-collapse-btn {
+.cm-node-badge {
   flex-shrink: 0;
-  background: transparent;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  padding: 0;
-  font: inherit;
-  line-height: 1;
+  opacity: 0.7;
+  font-size: 10px;
+}
+
+.cm-node-badge-muted {
+  opacity: 0.45;
+}
+
+.react-flow__edge.cm-edge-hierarchy path {
+  stroke: #8a8a8a;
+  stroke-width: 2;
+}
+
+.react-flow__edge.cm-edge-contains path {
+  stroke: #6a6a6a;
+  stroke-width: 1;
+}
+
+.react-flow__edge.cm-edge-calls path {
+  stroke: #5b9bd5;
+  stroke-width: 2;
 }
 
 .react-flow__edge.cm-edge-imports path {
-  stroke: #6cb6ff;
+  stroke: #9b59b6;
+  stroke-dasharray: 6 4;
 }
 
 .react-flow__edge.cm-edge-dynamicImport path {
-  stroke: #c792ea;
+  stroke: #f1c40f;
+  stroke-dasharray: 2 3;
 }
 
 .react-flow__edge.cm-edge-exports path {
   stroke: #c3e88d;
 }
 
+.react-flow__edge.cm-edge-async path {
+  stroke: #e2a66e !important;
+  stroke-width: 2;
+}
+
 .react-flow__edge.cm-edge-cycle path {
   stroke: #e06c75 !important;
   stroke-width: 2;
+}
+
+.react-flow__node {
+  transition: transform 0.2s ease;
 }
 
 .react-flow__controls {

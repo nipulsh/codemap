@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ExtensionToWebview, WebviewToExtension } from '../../../shared/messages';
 import { safeParseExtensionToWebview } from '../../../shared/messages';
-import type { GraphSnapshot } from '../../../shared/graph';
+import {
+  applyGraphPatch,
+  type GraphPatch,
+  type GraphSnapshot,
+} from '../../../shared/graph';
 
 declare global {
   interface Window {
@@ -19,18 +23,32 @@ export function postToExtension(message: WebviewToExtension): void {
   vscodeApi?.postMessage(message);
 }
 
+function mergePatch(
+  snapshot: GraphSnapshot,
+  patch: GraphPatch,
+): GraphSnapshot {
+  return applyGraphPatch(snapshot, patch);
+}
+
 export function useExtensionMessages(): {
   snapshot: GraphSnapshot | null;
+  lastPatch: GraphPatch | null;
+  fullVersion: number;
   progress: string | null;
   error: string | null;
   layoutEngine: string | null;
   setLayoutEngine: (engine: string | null) => void;
+  clearLastPatch: () => void;
 } {
   const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
+  const [lastPatch, setLastPatch] = useState<GraphPatch | null>(null);
+  const [fullVersion, setFullVersion] = useState(0);
   const [progress, setProgress] = useState<string | null>('Connecting…');
   const [error, setError] = useState<string | null>(null);
   const [layoutEngine, setLayoutEngine] = useState<string | null>(null);
   const readySent = useRef(false);
+
+  const clearLastPatch = useCallback(() => setLastPatch(null), []);
 
   const handleMessage = useCallback((raw: unknown) => {
     const parsed = safeParseExtensionToWebview(raw);
@@ -42,14 +60,23 @@ export function useExtensionMessages(): {
     switch (msg.type) {
       case 'graph:full':
         setSnapshot(msg.payload);
+        setLastPatch(null);
+        setFullVersion((v) => v + 1);
         setProgress(null);
         setError(null);
         break;
       case 'graph:patch':
-        // Phase 2
+        setSnapshot((prev) => {
+          if (!prev) {
+            return prev;
+          }
+          return mergePatch(prev, msg.payload);
+        });
+        setLastPatch(msg.payload);
+        setProgress(null);
         break;
       case 'progress':
-        setProgress(msg.payload.message);
+        setProgress(msg.payload.message || null);
         break;
       case 'error':
         setError(`${msg.payload.scope}: ${msg.payload.message}`);
@@ -74,5 +101,14 @@ export function useExtensionMessages(): {
     return () => window.removeEventListener('message', listener);
   }, [handleMessage]);
 
-  return { snapshot, progress, error, layoutEngine, setLayoutEngine };
+  return {
+    snapshot,
+    lastPatch,
+    fullVersion,
+    progress,
+    error,
+    layoutEngine,
+    setLayoutEngine,
+    clearLastPatch,
+  };
 }

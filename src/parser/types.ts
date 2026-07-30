@@ -17,14 +17,51 @@ export interface ExportSpec {
   isTypeOnly: boolean;
 }
 
+export type SymbolKind =
+  | 'Function'
+  | 'Class'
+  | 'Interface'
+  | 'Enum'
+  | 'Component';
+
+export interface SymbolInfo {
+  name: string;
+  kind: SymbolKind;
+  line: number;
+  exported: boolean;
+  /** Start/end offsets for call extraction scoping */
+  start: number;
+  end: number;
+}
+
+export interface CalleeRef {
+  /** Identifier or property name of the callee */
+  name: string;
+  /** Absolute path if resolved via import binding */
+  targetFile?: string;
+  /** True when callee is a top-level symbol in the same file */
+  local: boolean;
+  /** Call expression uses await / returns Promise-ish (heuristic) */
+  async?: boolean;
+  line?: number;
+}
+
 export interface FileParseResult {
   filePath: string;
   imports: ImportSpec[];
   exports: ExportSpec[];
+  symbols: SymbolInfo[];
   /** After barrel resolution: module paths this file effectively depends on */
   dependencyPaths: string[];
   /** Dynamic import resolved paths */
   dynamicImportPaths: string[];
+  error?: string;
+}
+
+export interface ResolveCallsResult {
+  filePath: string;
+  functionName: string;
+  callees: CalleeRef[];
   error?: string;
 }
 
@@ -42,10 +79,43 @@ export interface ParseRequest {
   }>;
 }
 
+export interface ParseFileRequest {
+  type: 'parseFile';
+  id: string;
+  workspaceRoot: string;
+  file: {
+    absolutePath: string;
+    content?: string;
+  };
+  tsconfigs: Array<{
+    configPath: string;
+    baseDir: string;
+  }>;
+}
+
+export interface ResolveCallsRequest {
+  type: 'resolveCalls';
+  id: string;
+  workspaceRoot: string;
+  filePath: string;
+  functionName: string;
+  content?: string;
+  tsconfigs: Array<{
+    configPath: string;
+    baseDir: string;
+  }>;
+}
+
 export interface ParseResponse {
   type: 'parseResult';
   id: string;
   results: FileParseResult[];
+}
+
+export interface ResolveCallsResponse {
+  type: 'resolveCallsResult';
+  id: string;
+  result: ResolveCallsResult;
 }
 
 export interface ParseErrorResponse {
@@ -54,5 +124,11 @@ export interface ParseErrorResponse {
   message: string;
 }
 
-export type WorkerInbound = ParseRequest;
-export type WorkerOutbound = ParseResponse | ParseErrorResponse;
+export type WorkerInbound =
+  | ParseRequest
+  | ParseFileRequest
+  | ResolveCallsRequest;
+export type WorkerOutbound =
+  | ParseResponse
+  | ResolveCallsResponse
+  | ParseErrorResponse;

@@ -6,8 +6,16 @@ import {
 } from './hooks/useExtensionMessages';
 
 export function App() {
-  const { snapshot, progress, error, layoutEngine, setLayoutEngine } =
-    useExtensionMessages();
+  const {
+    snapshot,
+    lastPatch,
+    fullVersion,
+    progress,
+    error,
+    layoutEngine,
+    setLayoutEngine,
+    clearLastPatch,
+  } = useExtensionMessages();
 
   const onRefresh = useCallback(() => {
     postToExtension({ type: 'graph:refresh' });
@@ -18,7 +26,7 @@ export function App() {
       <header className="cm-toolbar">
         <div className="cm-brand">CodeMap</div>
         <button type="button" className="cm-btn" onClick={onRefresh}>
-          Refresh Graph
+          Refresh
         </button>
         {layoutEngine ? (
           <span className="cm-meta">layout: {layoutEngine}</span>
@@ -27,8 +35,9 @@ export function App() {
       </header>
 
       <div className="cm-banner" role="note">
-        Static import/export graph only. Dynamic dispatch and runtime calls are
-        not shown.
+        Progressive explorer — double-click to expand folders, files, and
+        functions. Ctrl/Cmd+double-click opens in the editor. Static analysis
+        only.
       </div>
 
       {error ? <div className="cm-error">{error}</div> : null}
@@ -37,11 +46,14 @@ export function App() {
         {snapshot ? (
           <ArchitectureGraph
             snapshot={snapshot}
+            lastPatch={lastPatch}
+            fullVersion={fullVersion}
             onLayoutEngine={setLayoutEngine}
+            clearLastPatch={clearLastPatch}
           />
         ) : (
           <div className="cm-empty">
-            {progress ?? 'Waiting for graph…'}
+            {progress ?? 'Waiting for workspace…'}
           </div>
         )}
       </main>

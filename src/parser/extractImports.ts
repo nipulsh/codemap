@@ -1,7 +1,13 @@
 import * as ts from 'typescript';
 import { readFileSync, existsSync } from 'node:fs';
-import type { ExportSpec, FileParseResult, ImportSpec } from './types';
+import type {
+  ExportSpec,
+  FileParseResult,
+  ImportSpec,
+  ResolveCallsResult,
+} from './types';
 import { normalizePath } from '../utils/path';
+import { extractSymbols, resolveFunctionCallees } from './extractSymbols';
 
 interface ProjectContext {
   configPath: string;
@@ -395,10 +401,13 @@ export function parseFiles(
         },
       );
 
+      const symbols = extractSymbols(sourceFile);
+
       preliminary.set(filePath, {
         filePath,
         imports,
         exports,
+        symbols,
         dependencyPaths: [],
         dynamicImportPaths,
       });
@@ -407,6 +416,7 @@ export function parseFiles(
         filePath,
         imports: [],
         exports: [],
+        symbols: [],
         dependencyPaths: [],
         dynamicImportPaths: [],
         error: err instanceof Error ? err.message : String(err),
@@ -429,4 +439,94 @@ export function parseFiles(
   }
 
   return results;
+}
+
+/**
+ * Parse a single file (used for lazy file expansion).
+ */
+export function parseFile(
+  workspaceRoot: string,
+  file: { absolutePath: string; content?: string },
+  tsconfigs: Array<{ configPath: string; baseDir: string }>,
+): FileParseResult {
+  const results = parseFiles(workspaceRoot, [file], tsconfigs);
+  return (
+    results[0] ?? {
+      filePath: normalizePath(file.absolutePath),
+      imports: [],
+      exports: [],
+      symbols: [],
+      dependencyPaths: [],
+      dynamicImportPaths: [],
+      error: 'Parse returned no result',
+    }
+  );
+}
+
+/**
+ * Resolve immediate callees of a named function in a file.
+ */
+export function resolveCalls(
+  workspaceRoot: string,
+  filePath: string,
+  functionName: string,
+  tsconfigs: Array<{ configPath: string; baseDir: string }>,
+  content?: string,
+): ResolveCallsResult {
+  const normalized = normalizePath(filePath);
+  const projects = loadProjects(
+    tsconfigs.map((t) => ({
+      configPath: t.configPath,
+      baseDir: t.baseDir || workspaceRoot,
+    })),
+  );
+  for (const p of projects) {
+    if (!p.baseDir) {
+      p.baseDir = normalizePath(workspaceRoot);
+      p.options.baseUrl = p.options.baseUrl ?? p.baseDir;
+    }
+  }
+
+  try {
+    const sourceText =
+      content ?? readFileSync(filePath, 'utf8');
+    const project = pickProject(normalized, projects);
+    const sourceFile = ts.createSourceFile(
+      normalized,
+      sourceText,
+      project.options.target ?? ts.ScriptTarget.ES2022,
+      true,
+      normalized.endsWith('.tsx') || normalized.endsWith('.jsx')
+        ? ts.ScriptKind.TSX
+        : normalized.endsWith('.js') || normalized.endsWith('.jsx')
+          ? ts.ScriptKind.JS
+          : ts.ScriptKind.TS,
+    );
+
+    const options = {
+      ...project.options,
+      baseUrl: project.options.baseUrl ?? project.baseDir,
+    };
+    const { imports } = extractFromSourceFile(sourceFile, options);
+    const symbols = extractSymbols(sourceFile);
+    const callees = resolveFunctionCallees(
+      sourceFile,
+      functionName,
+      imports,
+      symbols,
+    );
+
+    return {
+      filePath: normalized,
+      functionName,
+      callees,
+    };
+  } catch (err) {
+    return {
+      filePath: normalized,
+      functionName,
+      callees: [],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
