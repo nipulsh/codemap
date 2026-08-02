@@ -211,12 +211,13 @@ flowchart TB
 | Class | Stores | Freshness |
 |-------|--------|-----------|
 | `FolderCache` | `DirectoryListing` by path | Manual invalidate |
-| `FileCache` | Parsed file + contentHash | `getIfFresh(path, hash)` |
+| `FileCache` | Parsed file + contentHash; disk-backed | `getIfFresh(path, hash)` + async disk load |
 | `FunctionCache` | Callees by symbol nodeId | Invalidate by file |
 | `InMemoryDependencyIndex` | Indexed files for full graph | Tests |
-| `NoOpDiskCache` | Nothing | Stub |
+| `FileSystemDiskCache` | Parse JSON under `~/.codemap/cache` | 24h TTL |
+| `NoOpDiskCache` | Nothing | Tests / disable persistence |
 
-**Lifecycle:** Owned by ExplorerService (or tests); cleared on refresh/dispose.
+**Lifecycle:** Owned by ExplorerService (or tests); memory cleared on refresh/dispose; disk entries survive restarts until TTL/invalidate.
 
 ---
 

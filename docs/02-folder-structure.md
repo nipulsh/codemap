@@ -142,19 +142,20 @@ flowchart TB
 
 ## `src/cache/`
 
-**Responsible for:** in-memory memoization (and future disk cache API).
+**Responsible for:** in-memory memoization and disk-backed parse persistence.
 
 | File | Role |
 |------|------|
 | `folderCache.ts` | Directory listings |
-| `fileCache.ts` | Parsed file results + content-hash freshness |
+| `fileCache.ts` | Parsed file results + content-hash freshness + disk backing |
 | `functionCache.ts` | Function → callees |
 | `dependencyIndex.ts` | Full-index API for `generateGraph` (tests) |
-| `diskCache.ts` | `NoOpDiskCache` Phase-2 stub |
+| `diskCache.ts` | `DiskCache` interface + `NoOpDiskCache` |
+| `fsDiskCache.ts` | `FileSystemDiskCache` — JSON files under `~/.codemap/cache` |
 
 **Used by:** ExplorerService, prefetch; tests use dependency index.
 
-**No durable storage** — see [09-database.md](09-database.md).
+**Durable storage:** file parse results only — see [09-database.md](09-database.md).
 
 ---
 

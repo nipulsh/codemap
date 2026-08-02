@@ -2,9 +2,9 @@
 
 ## Verdict
 
-**There is no database.** CodeMap does not use SQLite, Postgres, Prisma, MongoDB, or any other durable store.
+**There is no SQL/NoSQL database.** CodeMap does not use SQLite, Postgres, Prisma, MongoDB, or similar.
 
-This page documents what *does* exist for storage and I/O so you do not hunt for a persistence layer that is not wired up.
+It **does** persist parsed file results on disk via `FileSystemDiskCache`, and keeps folder / function results in memory for the life of the panel.
 
 ---
 
@@ -15,25 +15,49 @@ This page documents what *does* exist for storage and I/O so you do not hunt for
 | SQL / NoSQL database | **No** | — |
 | VS Code `globalState` / `workspaceState` | **No** | Not used |
 | Webview `getState` / `setState` | Typed only | Declared on `acquireVsCodeApi`; **not called** |
-| Disk cache file | **Stub** | `NoOpDiskCache` in [`src/cache/diskCache.ts`](../src/cache/diskCache.ts) |
+| Disk cache files | **Yes** | `FileSystemDiskCache` → `~/.codemap/cache/*.json` |
 | In-memory caches | **Yes** | Folder / File / Function caches |
 | Filesystem reads | **Yes** | `listDirectory`, scanners, hash, parser |
-| Filesystem writes (app data) | **No** | Extension does not write a cache DB |
+| Filesystem writes (app data) | **Yes** | Parse-result JSON under the cache directory |
 | Editor open | **Yes** | `node:open` opens user files via VS Code APIs |
 
 ---
 
-## In-memory caches (primary “storage”)
+## In-memory caches (primary hot path)
 
 Owned by `ExplorerService`:
 
 1. **FolderCache** — directory listings keyed by normalized path.
-2. **FileCache** — parse results keyed by path; validated with `contentHash`.
+2. **FileCache** — parse results keyed by path; validated with `contentHash`; backed by disk.
 3. **FunctionCache** — callee lists keyed by symbol `nodeId`.
 
 Additionally, tests use **`InMemoryDependencyIndex`** for the full-graph pipeline.
 
-All of these are process-local and die when the panel disposes or the Extension Host restarts.
+Folder and function maps are process-local and die when the panel disposes or the Extension Host restarts. File parse results can be restored from disk on the next session.
+
+---
+
+## Disk cache (parse persistence)
+
+[`src/cache/diskCache.ts`](../src/cache/diskCache.ts) defines the `DiskCache` interface and `NoOpDiskCache` (for tests / disabling persistence).
+
+[`src/cache/fsDiskCache.ts`](../src/cache/fsDiskCache.ts) implements:
+
+| Behavior | Detail |
+|----------|--------|
+| Location | `~/.codemap/cache` by default |
+| Format | One JSON file per key (`{ data, timestamp }`) |
+| TTL | 24 hours (configurable in constructor) |
+| API | `load`, `save`, `get`, `set`, `invalidate`, `clear` |
+
+[`FileCache`](../src/cache/fileCache.ts) uses `FileSystemDiskCache`:
+
+- Sync `get` — memory only (fast path).
+- `getAsync` — memory, then disk.
+- `set` / `setAsync` — memory + disk write-through.
+- `invalidate` / `clear` — both layers.
+
+See [CACHE_IMPROVEMENTS_SUMMARY.md](CACHE_IMPROVEMENTS_SUMMARY.md) for the design summary.
 
 ---
 
@@ -43,7 +67,8 @@ All of these are process-local and die when the panel disposes or the Extension 
 |-----------|--------|------|
 | List directory | `listDirectory` / `workspaceScanner` | Read |
 | Content hash / mtime | `utils/hash` | Read |
-| Parse source | `extractImports` via `fs` read inside TS APIs / file load | Read |
+| Parse source | `extractImports` via TS APIs / file load | Read |
+| Persist parse cache | `FileSystemDiskCache` | Read / write |
 | Watch changes | `vscode.FileSystemWatcher` | Events |
 | Open in editor | `openTextDocument` / `showTextDocument` | User file |
 
@@ -51,31 +76,14 @@ Ignored paths (not listed): `node_modules`, `.next`, `dist`, `build`, `coverage`
 
 ---
 
-## Disk cache stub (Phase 2)
-
-[`src/cache/diskCache.ts`](../src/cache/diskCache.ts) defines:
-
-```ts
-interface DiskCache {
-  // API reserved for persistence
-}
-class NoOpDiskCache implements DiskCache {
-  // all methods no-op
-}
-```
-
-**Assumption:** Roadmap item “Disk cache persistence” will implement real read/write behind this interface. Today nothing calls it in the live path.
-
----
-
 ## Graph persistence
 
-The graph exists in:
+The **graph layout and expansion state** exist in:
 
 1. Explorer host maps
 2. Webview React snapshot
 
-Closing the panel clears both (after dispose). There is no “save graph” or “load previous session.”
+Closing the panel clears those. There is no “save graph” or “restore previous expansion.” Disk cache only restores **parse results**, so re-expanding a file after restart can skip re-parsing when the hash still matches.
 
 ---
 
@@ -92,3 +100,4 @@ Search UI messages (`search:query` / `search:results`) are schema placeholders o
 
 - [08-state-management.md](08-state-management.md)
 - [14-design-decisions.md](14-design-decisions.md)
+- [CACHE_IMPROVEMENTS_SUMMARY.md](CACHE_IMPROVEMENTS_SUMMARY.md)

@@ -239,7 +239,7 @@ Private helpers: `ensureParsed`, `patch`, `trackChild`, `collectDescendants`, `r
 
 ### `fileCache.ts`
 
-**Exports:** `CachedFileParse`, `FileCache` — includes `getIfFresh`
+**Exports:** `CachedFileParse`, `FileCache` — includes `getIfFresh`, `getAsync`, `setAsync`; backs memory with `FileSystemDiskCache`
 
 ### `functionCache.ts`
 
@@ -251,7 +251,11 @@ Private helpers: `ensureParsed`, `patch`, `trackChild`, `collectDescendants`, `r
 
 ### `diskCache.ts`
 
-**Exports:** `DiskCache` interface, `NoOpDiskCache` (all methods no-op)
+**Exports:** `DiskCache` interface, `NoOpDiskCache` (all methods no-op; useful for tests)
+
+### `fsDiskCache.ts`
+
+**Exports:** `FileSystemDiskCache` — persists entries as JSON under `~/.codemap/cache` (24h TTL)
 
 ---
 
@@ -335,9 +339,8 @@ These files exist but are empty or no-op — **not** part of the live path:
 | `src/scanner/projectScanner.ts` | Empty stub |
 | `src/commands/scanProject.ts` | Empty stub |
 | `src/utils/fs.ts` | Empty stub |
-| `src/cache/diskCache.ts` | Interface + `NoOpDiskCache` only |
 
-**Assumption:** reserved for roadmap items (disk cache, richer scanning, dedicated scan command). Do not import them expecting behavior.
+**Note:** `src/cache/diskCache.ts` + `fsDiskCache.ts` are live — `FileCache` uses `FileSystemDiskCache`. `NoOpDiskCache` remains for tests. Other stubs above are reserved for richer scanning / a dedicated scan command.
 
 ---
 

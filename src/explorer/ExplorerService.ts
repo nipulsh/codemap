@@ -64,7 +64,7 @@ export class ExplorerService {
   ) {}
 
   async bootstrap(workspaceRoot: string): Promise<void> {
-    this.clearState();
+    await this.clearState();
     this.workspaceRoot = normalizePath(workspaceRoot);
     this.prefetch = new BackgroundPrefetch(
       this.pool,
@@ -145,9 +145,7 @@ export class ExplorerService {
     const expandedFiles = [...this.expandedFiles];
     const expandedFunctions = [...this.expandedFunctions];
 
-    this.folderCache.clear();
-    this.fileCache.clear();
-    this.functionCache.clear();
+    await this.clearState();
 
     await this.bootstrap(root);
 
@@ -563,7 +561,7 @@ export class ExplorerService {
   /** Invalidate caches for a changed file; re-expand if needed. */
   async onFileChanged(filePath: string): Promise<void> {
     const path = normalizePath(filePath);
-    this.fileCache.invalidate(path);
+    await this.fileCache.invalidateAsync(path);
     this.functionCache.invalidateFile(path);
 
     if (this.expandedFiles.has(path)) {
@@ -592,14 +590,14 @@ export class ExplorerService {
     }
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
     this.prefetch?.cancel();
-    this.clearState();
+    await this.clearState();
   }
 
   // ─── internals ─────────────────────────────────────────────
 
-  private clearState(): void {
+  private async clearState(): Promise<void> {
     this.nodeMap.clear();
     this.edgeMap.clear();
     this.expandedFolders.clear();
@@ -607,7 +605,7 @@ export class ExplorerService {
     this.expandedFunctions.clear();
     this.childrenOf.clear();
     this.folderCache.clear();
-    this.fileCache.clear();
+    await this.fileCache.clearAsync();
     this.functionCache.clear();
     this.tsconfigs = [];
     this.prefetch?.cancel();
@@ -706,7 +704,7 @@ export class ExplorerService {
       throw err;
     }
 
-    const fresh = this.fileCache.getIfFresh(path, hash);
+    const fresh = await this.fileCache.getIfFreshAsync(path, hash);
     if (fresh) {
       return fresh;
     }
@@ -730,7 +728,7 @@ export class ExplorerService {
       dynamicImportPaths: result.dynamicImportPaths,
       parseError: result.error,
     };
-    this.fileCache.set(cached);
+    await this.fileCache.setAsync(cached);
     return cached;
   }
 

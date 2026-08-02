@@ -20,15 +20,14 @@ After a folder expands, low-priority parsing of visible source files into FileCa
 
 When file A re-exports from file B, dependency resolution may “hop” one level so A’s effective dependency points at B’s underlying module rather than only the barrel file. Implemented in the import extractor.
 
-### Cache (Folder / File / Function)
+### Cache (Folder / File / Function / Disk)
 
-In-memory maps:
-
-- **FolderCache** — directory listings
-- **FileCache** — parse results keyed by path + content hash
+- **FolderCache** — in-memory directory listings
+- **FileCache** — parse results keyed by path + content hash; backed by disk
 - **FunctionCache** — callee lists keyed by symbol node id
+- **FileSystemDiskCache** — JSON files under `~/.codemap/cache` (24h TTL)
 
-Not a database. See [09-database.md](09-database.md).
+Not a SQL database. See [09-database.md](09-database.md) and [CACHE_IMPROVEMENTS_SUMMARY.md](CACHE_IMPROVEMENTS_SUMMARY.md).
 
 ### Call Graph
 

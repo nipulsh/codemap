@@ -15,7 +15,8 @@ The extension host owns scanning, parsing, and caches. [`ArchitecturePanel`](../
 ```mermaid
 flowchart LR
   Host[Extension Host] --> Explorer[ExplorerService]
-  Explorer --> Caches[In-memory caches]
+  Explorer --> Caches[Folder / File / Function caches]
+  Caches --> Disk[FileSystemDiskCache]
   Explorer --> Pool[WorkerPool]
   Pool --> Worker[parseWorker]
   Explorer --> Bus[MessageBus]
@@ -35,7 +36,7 @@ flowchart LR
 | 6 | [06-data-flow.md](06-data-flow.md) | You need to follow data transformations |
 | 7 | [07-api-flow.md](07-api-flow.md) | You work on commands or messages |
 | 8 | [08-state-management.md](08-state-management.md) | You need to know where state lives |
-| 9 | [09-database.md](09-database.md) | You wonder about persistence (spoiler: none) |
+| 9 | [09-database.md](09-database.md) | You wonder about storage / disk cache |
 | 10 | [10-workers.md](10-workers.md) | You debug parsing or worker crashes |
 | 11 | [11-events.md](11-events.md) | You need emitter → listener maps |
 | 12 | [12-function-reference.md](12-function-reference.md) | You need API-level detail |
@@ -54,6 +55,7 @@ flowchart LR
 | Add a new message type | [07](07-api-flow.md) → edit `shared/messages.ts` first |
 | Add a new node kind | [06](06-data-flow.md) → `shared/graph.ts` → Nodes.tsx → explorer |
 | Understand parsing | [10](10-workers.md) → [12](12-function-reference.md) parser section |
+| Understand disk cache | [09](09-database.md) → [CACHE_IMPROVEMENTS_SUMMARY.md](CACHE_IMPROVEMENTS_SUMMARY.md) |
 | Know what is safe to edit | See [Important files](#important-files) and [14](14-design-decisions.md) |
 
 ## Important files
@@ -75,7 +77,8 @@ flowchart LR
 
 - **Safer:** styles (`src/webview/styles.css`), custom node shells (`Nodes.tsx`), ignore rules (`scanner/ignore.ts`), layout tuning (`autoLayout.ts`), docs.
 - **Touch carefully:** shared Zod schemas, `ExplorerService`, `ArchitecturePanel`, worker IPC types.
-- **Stubs / unused:** empty files under `scanner/` (`detector`, `fileWalker`, …), `commands/scanProject.ts`, `utils/fs.ts`, `diskCache` (`NoOpDiskCache`). Do not assume they are wired up.
+- **Stubs / unused:** empty files under `scanner/` (`detector`, `fileWalker`, …), `commands/scanProject.ts`, `utils/fs.ts`. `NoOpDiskCache` exists for tests; live path uses `FileSystemDiskCache` via `FileCache`.
+- **Cache notes:** [CACHE_IMPROVEMENTS_SUMMARY.md](CACHE_IMPROVEMENTS_SUMMARY.md)
 
 ## Two pipelines (do not confuse them)
 
