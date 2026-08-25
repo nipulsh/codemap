@@ -492,7 +492,9 @@ sort and return
 
 ### `FileCache` methods
 
-`get`, `set`, `invalidate`, `clear`, `has`, **`getIfFresh(path, contentHash)`** — [`fileCache.ts`](../src/cache/fileCache.ts)
+`get`, `getAsync`, `set`, `setAsync`, `invalidate`, `clear`, `has`, **`getIfFresh(path, contentHash)`** — [`fileCache.ts`](../src/cache/fileCache.ts)
+
+Backed by `FileSystemDiskCache` for parse persistence across restarts.
 
 ### `FunctionCache` methods
 
@@ -502,9 +504,13 @@ sort and return
 
 `get`, `set`, `delete`, `clear`, `all`, `size` — [`dependencyIndex.ts`](../src/cache/dependencyIndex.ts)
 
-### `NoOpDiskCache`
+### `DiskCache` / `NoOpDiskCache`
 
-`load`, `save`, `invalidate` — no-ops — [`diskCache.ts`](../src/cache/diskCache.ts)
+`load`, `save`, `get`, `set`, `invalidate`, `clear` — interface + no-op — [`diskCache.ts`](../src/cache/diskCache.ts)
+
+### `FileSystemDiskCache`
+
+`load`, `save`, `get`, `set`, `invalidate`, `clear` — JSON under `~/.codemap/cache`, 24h TTL — [`fsDiskCache.ts`](../src/cache/fsDiskCache.ts)
 
 ---
 
@@ -638,9 +644,8 @@ sort and return
 | `src/scanner/projectScanner.ts` | — | Empty |
 | `src/commands/scanProject.ts` | — | Empty |
 | `src/utils/fs.ts` | — | Empty |
-| `src/cache/diskCache.ts` | `DiskCache`, `NoOpDiskCache` | Stub only |
 
-Do not call these expecting production behavior.
+`src/cache/diskCache.ts` and `fsDiskCache.ts` are production code (`FileCache` uses `FileSystemDiskCache`). Do not call the empty stubs above expecting production behavior.
 
 ---
 

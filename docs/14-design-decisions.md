@@ -75,17 +75,18 @@ Architectural choices, reasons, and trade-offs.
 
 ---
 
-## 6. Three-layer in-memory cache
+## 6. Three-layer cache + disk persistence
 
-**Decision:** FolderCache + FileCache (hash-fresh) + FunctionCache.
+**Decision:** FolderCache + FileCache (hash-fresh, disk-backed) + FunctionCache; persist file parses via `FileSystemDiskCache`.
 
-**Why:** Different invalidation granularities. Expanding a folder should not re-parse; expanding a function should not re-list directories; editing a file should not wipe unrelated folders.
+**Why:** Different invalidation granularities. Expanding a folder should not re-parse; expanding a function should not re-list directories; editing a file should not wipe unrelated folders. Disk backing warms the second session without restoring graph UI state.
 
 **Trade-offs:**
 
-- (+) Responsive re-expand / refresh.
+- (+) Responsive re-expand / refresh; faster re-parse after restart.
 - (−) Memory grows with exploration (acceptable while panel lives).
-- (−) No persistence yet (`NoOpDiskCache`).
+- (−) Disk cache is parse-only; expansion session is not restored.
+- (−) Filename-sanitized keys and TTL (24h) are simple, not a full content-addressed store.
 
 ---
 
@@ -144,7 +145,7 @@ Architectural choices, reasons, and trade-offs.
 | New message | `shared/messages.ts` first | Ad-hoc untyped posts |
 | New node kind | `shared/graph.ts` + Nodes + explorer | Webview-only kinds |
 | Faster open | Keep lazy listing | Accidental full scan in bootstrap |
-| Persistence | Implement `DiskCache` | Writing random files from webview |
+| Persistence | Extend `DiskCache` / `FileSystemDiskCache` | Ad-hoc writes from the webview |
 | Search | Host query + `search:results` | Client-only fake index |
 
 ## Related docs

@@ -1,5 +1,6 @@
 import { Worker } from 'node:worker_threads';
 import { join } from 'node:path';
+import { cpus } from 'node:os';
 import type {
   FileParseResult,
   ParseFileRequest,
@@ -49,29 +50,41 @@ type Pending =
 
 /**
  * Manages a pool of Node worker_threads for AST parsing.
- * Single worker with a priority queue (user expands jump ahead of prefetch).
+ * Multiple workers with a priority queue (user expands jump ahead of prefetch).
  */
 export class WorkerPool {
-  private worker: Worker | undefined;
-  private nextId = 1;
+  private workers: Worker[] = [];
   private readonly pending = new Map<string, Pending>();
-  private readonly queue: Pending[] = [];
-  private busy = false;
+  private readonly highPriorityQueue: Pending[] = [];
+  private readonly lowPriorityQueue: Pending[] = [];
+  private readonly workerTaskCount = new Map<Worker, number>();
   private readonly workerScript: string;
-  private maxOldSpaceSizeMb: number;
+  private readonly maxOldSpaceSizeMb: number;
+  private readonly numWorkers: number;
+  private nextId = 1;
 
-  constructor(options?: { workerScript?: string; maxOldSpaceSizeMb?: number }) {
+  constructor(options?: { workerScript?: string; maxOldSpaceSizeMb?: number; numWorkers?: number }) {
     this.workerScript =
       options?.workerScript ??
       join(__dirname, 'parser', 'workers', 'parseWorker.js');
     this.maxOldSpaceSizeMb = options?.maxOldSpaceSizeMb ?? 1536;
+    // Default to number of CPU cores minus 1 (leave one for main thread), minimum 1
+    this.numWorkers =
+      options?.numWorkers ?? Math.max(1, Math.floor(cpus().length * 0.8));
+
+    // Initialize workers
+    this.initializeWorkers();
   }
 
-  private ensureWorker(): Worker {
-    if (this.worker) {
-      return this.worker;
+  private initializeWorkers(): void {
+    for (let i = 0; i < this.numWorkers; i++) {
+      const worker = this.createWorker();
+      this.workers.push(worker);
+      this.workerTaskCount.set(worker, 0);
     }
+  }
 
+  private createWorker(): Worker {
     const worker = new Worker(this.workerScript, {
       resourceLimits: {
         maxOldGenerationSizeMb: this.maxOldSpaceSizeMb,
@@ -81,12 +94,13 @@ export class WorkerPool {
     worker.on('message', (msg: WorkerOutbound) => {
       const pending = this.pending.get(msg.id);
       if (!pending) {
-        this.busy = false;
-        this.pump();
+        // This shouldn't happen, but if it does, clean up and continue
+        this.decrementTaskCount(worker);
         return;
       }
+
       this.pending.delete(msg.id);
-      this.busy = false;
+      this.decrementTaskCount(worker);
 
       if (msg.type === 'error') {
         pending.reject(new Error(msg.message));
@@ -100,58 +114,140 @@ export class WorkerPool {
       } else {
         pending.reject(new Error('Unexpected worker response type'));
       }
-      this.pump();
+
+      // Process next task in queue now that a worker is free
+      this.processQueue();
     });
 
     worker.on('error', (err) => {
-      for (const [, p] of this.pending) {
-        p.reject(err);
+      // Reject all pending tasks for this worker
+      const failedTasks = [];
+      for (const [id, pending] of this.pending.entries()) {
+        // Note: We don't know which task was on this worker,
+        // so we'll reject all - in practice this is rare
+        failedTasks.push({ id, pending });
       }
-      this.pending.clear();
-      this.queue.length = 0;
-      this.busy = false;
-      this.worker = undefined;
+
+      for (const { id, pending } of failedTasks) {
+        this.pending.delete(id);
+        pending.reject(err);
+      }
+
+      this.clearWorkerTasks(worker);
+      this.replaceWorker(worker);
+      this.processQueue();
     });
 
     worker.on('exit', (code) => {
       if (code !== 0) {
-        for (const [, p] of this.pending) {
-          p.reject(new Error(`Parser worker exited with code ${code}`));
+        // Reject all pending tasks for this worker
+        const failedTasks = [];
+        for (const [id, pending] of this.pending.entries()) {
+          failedTasks.push({ id, pending });
         }
-        this.pending.clear();
-        this.queue.length = 0;
+
+        for (const { id, pending } of failedTasks) {
+          this.pending.delete(id);
+          pending.reject(new Error(`Parser worker exited with code ${code}`));
+        }
       }
-      this.busy = false;
-      this.worker = undefined;
+
+      this.clearWorkerTasks(worker);
+      this.replaceWorker(worker);
+      this.processQueue();
     });
 
-    this.worker = worker;
     return worker;
   }
 
-  private enqueue(item: Pending): void {
-    if (item.priority === 'high') {
-      const firstLow = this.queue.findIndex((q) => q.priority === 'low');
-      if (firstLow === -1) {
-        this.queue.push(item);
-      } else {
-        this.queue.splice(firstLow, 0, item);
-      }
-    } else {
-      this.queue.push(item);
+  private decrementTaskCount(worker: Worker): void {
+    const current = this.workerTaskCount.get(worker) ?? 0;
+    if (current > 0) {
+      this.workerTaskCount.set(worker, current - 1);
     }
-    this.pump();
   }
 
-  private pump(): void {
-    if (this.busy || this.queue.length === 0) {
-      return;
+  private incrementTaskCount(worker: Worker): void {
+    const current = this.workerTaskCount.get(worker) ?? 0;
+    this.workerTaskCount.set(worker, current + 1);
+  }
+
+  private clearWorkerTasks(worker: Worker): void {
+    // Note: We don't track which specific tasks are on which worker
+    // In a more sophisticated implementation, we would track this
+    // For now, we rely on the timeout/error mechanisms
+  }
+
+  private replaceWorker(failedWorker: Worker): void {
+    const index = this.workers.indexOf(failedWorker);
+    if (index !== -1) {
+      this.workers.splice(index, 1);
+      this.workerTaskCount.delete(failedWorker);
+
+      const worker = this.createWorker();
+      this.workers.splice(index, 0, worker);
+      this.workerTaskCount.set(worker, 0);
     }
-    const item = this.queue.shift()!;
-    const worker = this.ensureWorker();
-    this.busy = true;
-    this.pending.set(item.request.id, item);
-    worker.postMessage(item.request);
+  }
+
+  private enqueue(task: Pending): void {
+    if (task.priority === 'high') {
+      this.highPriorityQueue.push(task);
+    } else {
+      this.lowPriorityQueue.push(task);
+    }
+    this.processQueue();
+  }
+
+  private processQueue(): void {
+    // Process high priority queue first
+    while (this.highPriorityQueue.length > 0) {
+      const worker = this.getLeastBusyWorker();
+      if (!worker) break; // All workers busy
+
+      const task = this.highPriorityQueue.shift()!;
+      this.assignTaskToWorker(worker, task);
+    }
+
+    // Then process low priority queue
+    while (this.lowPriorityQueue.length > 0) {
+      const worker = this.getLeastBusyWorker();
+      if (!worker) break; // All workers busy
+
+      const task = this.lowPriorityQueue.shift()!;
+      this.assignTaskToWorker(worker, task);
+    }
+  }
+
+  private getLeastBusyWorker(): Worker | null {
+    if (this.workers.length === 0) return null;
+
+    return this.workers.reduce((minWorker, currentWorker) => {
+      const minCount = this.workerTaskCount.get(minWorker) ?? 0;
+      const currentCount = this.workerTaskCount.get(currentWorker) ?? 0;
+      return currentCount < minCount ? currentWorker : minWorker;
+    });
+  }
+
+  private assignTaskToWorker(worker: Worker, task: Pending): void {
+    this.pending.set(task.request.id, task);
+    this.incrementTaskCount(worker);
+    worker.postMessage(task.request);
+  }
+
+  public async dispose(): Promise<void> {
+    // Clear queues
+    this.highPriorityQueue.length = 0;
+    this.lowPriorityQueue.length = 0;
+
+    // Terminate all workers
+    await Promise.all(
+      this.workers.map(worker => worker.terminate())
+    );
+
+    this.workers = [];
+    this.workerTaskCount.clear();
+    this.pending.clear();
   }
 
   parseFiles(input: ParseFilesInput): Promise<FileParseResult[]> {
@@ -229,15 +325,5 @@ export class WorkerPool {
         request,
       });
     });
-  }
-
-  async dispose(): Promise<void> {
-    this.queue.length = 0;
-    if (this.worker) {
-      await this.worker.terminate();
-      this.worker = undefined;
-    }
-    this.pending.clear();
-    this.busy = false;
   }
 }

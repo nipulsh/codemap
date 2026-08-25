@@ -23,6 +23,7 @@ The product goal is **fast first paint** and **on-demand depth**, so large monor
 | Function expand | Resolve callees → `calls` edges (file stub if target not expanded) |
 | Call rewiring | Expanding a target file upgrades stub call edges to symbol nodes |
 | Background prefetch | After folder expand, low-priority parse into `FileCache` only |
+| Disk cache | `FileSystemDiskCache` persists parse results under `~/.codemap/cache` |
 | File system watcher | Invalidates and re-expands changed paths |
 | Layout | ELK layered layout with Dagre fallback; incremental placement for patches |
 
@@ -95,7 +96,7 @@ flowchart TB
 | ExplorerService | Business logic for expand/collapse/refresh |
 | Scanner | List directories (live) or full-scan (tests) |
 | Parser + Worker | TypeScript AST → imports/symbols/calls |
-| Cache | In-memory folder / file / function results |
+| Cache | In-memory folder / file / function results; file parses backed by disk |
 | Shared protocol | Zod-validated messages and graph model |
 | Webview | Render graph; send user actions |
 
@@ -161,12 +162,12 @@ Do not assume the live panel calls `scanWorkspace` or `generateGraph` — it doe
 
 ## What does not exist (yet)
 
-- No database
-- No disk cache persistence (`NoOpDiskCache` stub only)
+- No SQL/NoSQL database (disk JSON cache only — see [09-database.md](09-database.md))
 - No search/filter UI (schemas exist; handlers are no-ops)
 - No multi-worker pool (single worker + priority queue)
+- No saved graph / expansion session restore (only parse results persist)
 
-See [09-database.md](09-database.md) and [14-design-decisions.md](14-design-decisions.md).
+See [09-database.md](09-database.md), [CACHE_IMPROVEMENTS_SUMMARY.md](CACHE_IMPROVEMENTS_SUMMARY.md), and [14-design-decisions.md](14-design-decisions.md).
 
 ## Related docs
 

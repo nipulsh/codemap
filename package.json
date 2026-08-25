@@ -3,6 +3,16 @@
   "displayName": "CodeMap",
   "description": "Interactive code architecture visualizer for React, Next.js, and TypeScript",
   "version": "0.1.0",
+  "publisher": "nipulsh",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nipulsh/codemap.git"
+  },
+  "homepage": "https://github.com/nipulsh/codemap#readme",
+  "bugs": {
+    "url": "https://github.com/nipulsh/codemap/issues"
+  },
+  "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },

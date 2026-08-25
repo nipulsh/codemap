@@ -58,8 +58,9 @@ Owned by [`ExplorerService`](../src/explorer/ExplorerService.ts):
 | Cache | Key | Value |
 |-------|-----|-------|
 | FolderCache | dir path | `DirectoryListing` |
-| FileCache | file path | `CachedFileParse` (+ hash) |
+| FileCache | file path | `CachedFileParse` (+ hash); disk-backed |
 | FunctionCache | symbol nodeId | callees |
+| FileSystemDiskCache | sanitized path key | JSON under `~/.codemap/cache` |
 
 **Consistency rule:** Host maps are updated **before** emitting patches. Webview applies the same patch independently — it does not “own” truth.
 
@@ -106,11 +107,13 @@ Owned by [`WorkerPool`](../src/parser/workerPool.ts):
 
 | Kind | Durable across panel close? | Durable across VS Code restart? |
 |------|-----------------------------|----------------------------------|
-| Explorer caches/maps | No | No |
+| Explorer maps / expansion | No | No |
+| Folder / function caches | No | No |
+| FileCache (memory) | No | No |
+| FileCache (disk) | Yes | Yes (until TTL / invalidate) |
 | Webview RF positions | No (unless panel hidden with retainContext) | No |
-| Disk / DB | N/A | N/A |
 
-`retainContextWhenHidden: true` keeps webview JS alive while the panel is hidden (not closed), so React state can survive tab switches.
+`retainContextWhenHidden: true` keeps webview JS alive while the panel is hidden (not closed), so React state can survive tab switches. Disk cache restores **parse results only**, not expansion or layout.
 
 ---
 

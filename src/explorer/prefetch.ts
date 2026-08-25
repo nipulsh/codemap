@@ -22,7 +22,7 @@ export class BackgroundPrefetch {
     private readonly workspaceRoot: string,
   ) {}
 
-  enqueueFiles(absolutePaths: string[]): void {
+  async enqueueFiles(absolutePaths: string[]): Promise<void> {
     const sourceFiles = absolutePaths.filter((p) =>
       isSourceFile(basename(p)),
     );
@@ -30,14 +30,16 @@ export class BackgroundPrefetch {
       return;
     }
 
-    const toParse = sourceFiles.filter((p) => {
+    const toParse = await Promise.all(sourceFiles.map(async (p) => {
       const norm = normalizePath(p);
-      if (this.queued.has(norm) || this.fileCache.has(norm)) {
-        return false;
+      const queued = this.queued.has(norm);
+      const cached = await this.fileCache.hasAsync(norm);
+      if (queued || cached) {
+        return null;
       }
       this.queued.add(norm);
-      return true;
-    });
+      return p;
+    })).then(arr => arr.filter((p): p is string => p !== null));
 
     if (toParse.length === 0) {
       return;
@@ -69,11 +71,12 @@ export class BackgroundPrefetch {
         for (const r of results) {
           const path = normalizePath(r.filePath);
           this.queued.delete(path);
-          if (this.fileCache.has(path)) {
+          const hasCached = await this.fileCache.hasAsync(path);
+          if (hasCached) {
             continue;
           }
           try {
-            this.fileCache.set({
+            await this.fileCache.setAsync({
               absolutePath: path,
               relativePath: toPosix(relative(this.workspaceRoot, path)),
               contentHash: contentHash(path),
