@@ -4,15 +4,20 @@ import {
   Background,
   Controls,
   MiniMap,
-  useEdgesState,
-  useNodesState,
+  applyEdgeChanges,
+  applyNodeChanges,
   type Edge,
+  type EdgeChange,
   type Node,
+  type NodeChange,
   type NodeTypes,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { GraphSnapshot } from '../../../shared/graph';
 import { layoutGraph } from '../layout/autoLayout';
+import type { NodeSize } from '../layout/nodeSizes';
+import { filterEdges, filterNodes, type EdgeFilter } from '../edgeFilter';
+import { applySearchToNodes } from '../nodeSearch';
 import { FileNode, FolderNode, type ArchitectureNodeData } from './Nodes';
 import { postToExtension } from '../hooks/useExtensionMessages';
 
@@ -23,12 +28,65 @@ const nodeTypes: NodeTypes = {
 
 interface Props {
   snapshot: GraphSnapshot;
+  nodeSize: NodeSize;
+  edgeFilter: EdgeFilter;
+  searchQuery: string;
   onLayoutEngine?: (engine: string) => void;
 }
 
-export function ArchitectureGraph({ snapshot, onLayoutEngine }: Props) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+function applyHoverToNodes(
+  nodes: Node[],
+  edges: Edge[],
+  hoveredNodeId: string | null,
+): Node[] {
+  if (!hoveredNodeId) {
+    return nodes;
+  }
+
+  const neighborIds = new Set<string>();
+  for (const edge of edges) {
+    if (edge.source === hoveredNodeId) {
+      neighborIds.add(edge.target);
+    } else if (edge.target === hoveredNodeId) {
+      neighborIds.add(edge.source);
+    }
+  }
+
+  return nodes.map((node) => {
+    if (node.id === hoveredNodeId) {
+      return { ...node, className: 'cm-hovered' };
+    }
+    if (neighborIds.has(node.id)) {
+      return { ...node, className: 'cm-neighbor' };
+    }
+    return node;
+  });
+}
+
+function applyHoverToEdges(edges: Edge[], hoveredNodeId: string | null): Edge[] {
+  if (!hoveredNodeId) {
+    return edges;
+  }
+
+  return edges.map((edge) => {
+    if (edge.source !== hoveredNodeId && edge.target !== hoveredNodeId) {
+      return edge;
+    }
+    const className = [edge.className, 'cm-edge-highlighted'].filter(Boolean).join(' ');
+    return { ...edge, className };
+  });
+}
+
+export function ArchitectureGraph({
+  snapshot,
+  nodeSize,
+  edgeFilter,
+  searchQuery,
+  onLayoutEngine,
+}: Props) {
+  const [layoutNodes, setLayoutNodes] = useState<Node[]>([]);
+  const [layoutEdges, setLayoutEdges] = useState<Edge[]>([]);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [layouting, setLayouting] = useState(false);
 
@@ -49,7 +107,7 @@ export function ArchitectureGraph({ snapshot, onLayoutEngine }: Props) {
     setLayouting(true);
 
     void (async () => {
-      const result = await layoutGraph(snapshot, collapsed);
+      const result = await layoutGraph(snapshot, collapsed, nodeSize);
       if (cancelled) {
         return;
       }
@@ -95,18 +153,65 @@ export function ArchitectureGraph({ snapshot, onLayoutEngine }: Props) {
           source: e.source,
           target: e.target,
           className: 'cm-edge-contains',
-          style: { strokeDasharray: '4 4', opacity: 0.35 },
         }));
 
-      setNodes(rfNodes);
-      setEdges([...rfEdges, ...containsEdges]);
+      setLayoutNodes(rfNodes);
+      setLayoutEdges([...rfEdges, ...containsEdges]);
+      setHoveredNodeId(null);
       setLayouting(false);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [snapshot, collapsed, setNodes, setEdges, toggleCollapse, onLayoutEngine]);
+  }, [snapshot, collapsed, nodeSize, toggleCollapse, onLayoutEngine]);
+
+  const visibleEdges = useMemo(
+    () => filterEdges(layoutEdges, edgeFilter),
+    [layoutEdges, edgeFilter],
+  );
+
+  const visibleNodes = useMemo(
+    () => filterNodes(layoutNodes, visibleEdges, edgeFilter),
+    [layoutNodes, visibleEdges, edgeFilter],
+  );
+
+  const hoveredNodes = useMemo(
+    () => applyHoverToNodes(visibleNodes, visibleEdges, hoveredNodeId),
+    [visibleNodes, visibleEdges, hoveredNodeId],
+  );
+
+  const nodes = useMemo(
+    () => applySearchToNodes(hoveredNodes, searchQuery),
+    [hoveredNodes, searchQuery],
+  );
+
+  const edges = useMemo(
+    () => applyHoverToEdges(visibleEdges, hoveredNodeId),
+    [visibleEdges, hoveredNodeId],
+  );
+
+  const onNodesChange = useCallback(
+    (changes: NodeChange<Node>[]) => {
+      setLayoutNodes((current) => applyNodeChanges(changes, current));
+    },
+    [],
+  );
+
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange<Edge>[]) => {
+      setLayoutEdges((current) => applyEdgeChanges(changes, current));
+    },
+    [],
+  );
+
+  const onNodeMouseEnter = useCallback((_: React.MouseEvent, node: Node) => {
+    setHoveredNodeId(node.id);
+  }, []);
+
+  const onNodeMouseLeave = useCallback(() => {
+    setHoveredNodeId(null);
+  }, []);
 
   const onNodeDoubleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
@@ -128,9 +233,14 @@ export function ArchitectureGraph({ snapshot, onLayoutEngine }: Props) {
   const legend = useMemo(
     () => (
       <div className="cm-legend">
+        <span className="cm-legend-item cm-legend-folder">folder</span>
+        <span className="cm-legend-item cm-legend-file">file</span>
+        <span className="cm-legend-separator" aria-hidden="true" />
         <span className="cm-legend-item cm-legend-imports">imports</span>
         <span className="cm-legend-item cm-legend-dynamic">dynamicImport</span>
         <span className="cm-legend-item cm-legend-exports">exports</span>
+        <span className="cm-legend-item cm-legend-contains">contains</span>
+        <span className="cm-legend-item cm-legend-cycle">cycle</span>
         {layouting ? <span className="cm-legend-item">layout…</span> : null}
       </div>
     ),
@@ -145,6 +255,8 @@ export function ArchitectureGraph({ snapshot, onLayoutEngine }: Props) {
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
         onNodeDoubleClick={onNodeDoubleClick}
         nodeTypes={nodeTypes}
         fitView

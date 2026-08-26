@@ -1,4 +1,5 @@
 import type { GraphEdge, GraphNode, GraphSnapshot } from '../../../shared/graph';
+import { getNodeDimensions, type NodeSize } from './nodeSizes';
 
 export interface LayoutResult {
   nodes: Array<GraphNode & { position: { x: number; y: number }; width: number; height: number }>;
@@ -48,6 +49,7 @@ function visibleGraph(
 async function layoutWithElk(
   nodes: GraphNode[],
   edges: GraphEdge[],
+  nodeSize: NodeSize,
 ): Promise<LayoutResult> {
   const ELK = (await import('elkjs/lib/elk.bundled.js')).default;
   const elk = new ELK();
@@ -60,11 +62,13 @@ async function layoutWithElk(
       'elk.spacing.nodeNode': '40',
       'elk.layered.spacing.nodeNodeBetweenLayers': '60',
     },
-    children: nodes.map((n) => ({
-      id: n.id,
-      width: n.kind === 'Folder' ? 180 : 160,
-      height: n.kind === 'Folder' ? 48 : 40,
-    })),
+    children: nodes.map((n) => {
+      const { width, height } = getNodeDimensions(
+        n.kind === 'Folder' ? 'Folder' : 'File',
+        nodeSize,
+      );
+      return { id: n.id, width, height };
+    }),
     edges: edges
       .filter((e) => e.kind !== 'contains')
       .map((e) => ({
@@ -85,11 +89,15 @@ async function layoutWithElk(
 
   const positioned = nodes.map((n) => {
     const child = laid.children?.find((c: { id: string }) => c.id === n.id);
+    const { width, height } = getNodeDimensions(
+      n.kind === 'Folder' ? 'Folder' : 'File',
+      nodeSize,
+    );
     return {
       ...n,
       position: { x: child?.x ?? 0, y: child?.y ?? 0 },
-      width: n.kind === 'Folder' ? 180 : 160,
-      height: n.kind === 'Folder' ? 48 : 40,
+      width,
+      height,
     };
   });
 
@@ -99,6 +107,7 @@ async function layoutWithElk(
 async function layoutWithDagre(
   nodes: GraphNode[],
   edges: GraphEdge[],
+  nodeSize: NodeSize,
 ): Promise<LayoutResult> {
   const dagre = await import('@dagrejs/dagre');
   const g = new dagre.graphlib.Graph();
@@ -106,10 +115,11 @@ async function layoutWithDagre(
   g.setGraph({ rankdir: 'LR', nodesep: 40, ranksep: 60 });
 
   for (const n of nodes) {
-    g.setNode(n.id, {
-      width: n.kind === 'Folder' ? 180 : 160,
-      height: n.kind === 'Folder' ? 48 : 40,
-    });
+    const { width, height } = getNodeDimensions(
+      n.kind === 'Folder' ? 'Folder' : 'File',
+      nodeSize,
+    );
+    g.setNode(n.id, { width, height });
   }
 
   for (const e of edges) {
@@ -123,14 +133,18 @@ async function layoutWithDagre(
 
   const positioned = nodes.map((n) => {
     const gn = g.node(n.id);
+    const { width, height } = getNodeDimensions(
+      n.kind === 'Folder' ? 'Folder' : 'File',
+      nodeSize,
+    );
     return {
       ...n,
       position: {
         x: (gn?.x ?? 0) - (gn?.width ?? 0) / 2,
         y: (gn?.y ?? 0) - (gn?.height ?? 0) / 2,
       },
-      width: n.kind === 'Folder' ? 180 : 160,
-      height: n.kind === 'Folder' ? 48 : 40,
+      width,
+      height,
     };
   });
 
@@ -143,6 +157,7 @@ async function layoutWithDagre(
 export async function layoutGraph(
   snapshot: GraphSnapshot,
   collapsedFolders: Set<string>,
+  nodeSize: NodeSize = 'medium',
 ): Promise<LayoutResult> {
   const { nodes, edges } = visibleGraph(snapshot, collapsedFolders);
 
@@ -151,8 +166,8 @@ export async function layoutGraph(
   }
 
   try {
-    return await layoutWithElk(nodes, edges);
+    return await layoutWithElk(nodes, edges, nodeSize);
   } catch {
-    return layoutWithDagre(nodes, edges);
+    return layoutWithDagre(nodes, edges, nodeSize);
   }
 }

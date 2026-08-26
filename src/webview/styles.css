@@ -6,10 +6,25 @@
   --cm-accent-fg: var(--vscode-button-foreground, #fff);
   --cm-muted: var(--vscode-descriptionForeground, #9d9d9d);
   --cm-error: var(--vscode-errorForeground, #f44747);
-  --cm-folder: #3a5f7a;
-  --cm-file: #2d4a3e;
-  --cm-cycle: #7a3a3a;
   --cm-banner-bg: color-mix(in srgb, var(--cm-accent) 18%, transparent);
+
+  /* Node palette */
+  --cm-node-folder: color-mix(in srgb, var(--vscode-charts-blue, #6cb6ff) 28%, var(--cm-bg));
+  --cm-node-file: color-mix(in srgb, var(--vscode-charts-green, #c3e88d) 22%, var(--cm-bg));
+  --cm-node-component: color-mix(in srgb, var(--vscode-charts-orange, #d18616) 24%, var(--cm-bg));
+  --cm-node-function: color-mix(in srgb, var(--vscode-charts-purple, #c792ea) 24%, var(--cm-bg));
+
+  /* Edge palette */
+  --cm-edge-imports: var(--vscode-charts-blue, #6cb6ff);
+  --cm-edge-dynamicImport: var(--vscode-charts-purple, #c792ea);
+  --cm-edge-exports: var(--vscode-charts-green, #c3e88d);
+  --cm-edge-contains: var(--vscode-descriptionForeground, #9d9d9d);
+  --cm-edge-cycle: var(--vscode-errorForeground, #e06c75);
+
+  /* Backward-compatible aliases */
+  --cm-folder: var(--cm-node-folder);
+  --cm-file: var(--cm-node-file);
+  --cm-cycle: var(--cm-edge-cycle);
 }
 
 * {
@@ -62,6 +77,73 @@ body,
 
 .cm-btn:hover {
   filter: brightness(1.1);
+}
+
+.cm-size-group {
+  display: flex;
+  gap: 4px;
+}
+
+.cm-btn-active {
+  box-shadow: inset 0 0 0 1px var(--cm-accent-fg);
+  filter: brightness(1.15);
+}
+
+.cm-filter-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--cm-muted);
+}
+
+.cm-select {
+  background: var(--cm-bg);
+  color: var(--cm-fg);
+  border: 1px solid var(--cm-border);
+  border-radius: 2px;
+  padding: 3px 6px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cm-search-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--cm-muted);
+  position: relative;
+}
+
+.cm-search-input {
+  background: var(--cm-bg);
+  color: var(--cm-fg);
+  border: 1px solid var(--cm-border);
+  border-radius: 2px;
+  padding: 3px 24px 3px 6px;
+  font: inherit;
+  min-width: 140px;
+}
+
+.cm-search-input::placeholder {
+  color: var(--cm-muted);
+}
+
+.cm-search-clear {
+  position: absolute;
+  right: 4px;
+  background: transparent;
+  border: none;
+  color: var(--cm-muted);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  padding: 2px 4px;
+}
+
+.cm-search-clear:hover {
+  color: var(--cm-fg);
 }
 
 .cm-meta,
@@ -124,14 +206,41 @@ body,
   border: 1px solid var(--cm-border);
 }
 
+.cm-legend-separator {
+  width: 1px;
+  align-self: stretch;
+  background: var(--cm-border);
+  margin: 0 2px;
+}
+
+.cm-legend-folder {
+  background: var(--cm-node-folder);
+  border-color: var(--cm-border);
+}
+
+.cm-legend-file {
+  background: var(--cm-node-file);
+  border-color: var(--cm-border);
+}
+
 .cm-legend-imports {
-  border-color: #6cb6ff;
+  border-color: var(--cm-edge-imports);
 }
+
 .cm-legend-dynamic {
-  border-color: #c792ea;
+  border-color: var(--cm-edge-dynamicImport);
 }
+
 .cm-legend-exports {
-  border-color: #c3e88d;
+  border-color: var(--cm-edge-exports);
+}
+
+.cm-legend-contains {
+  border-color: var(--cm-edge-contains);
+}
+
+.cm-legend-cycle {
+  border-color: var(--cm-edge-cycle);
 }
 
 .cm-node {
@@ -155,8 +264,8 @@ body,
 }
 
 .cm-cycle {
-  border-color: #e06c75;
-  box-shadow: inset 0 0 0 1px #e06c75;
+  border-color: var(--cm-edge-cycle);
+  box-shadow: inset 0 0 0 1px var(--cm-edge-cycle);
 }
 
 .cm-node-label {
@@ -181,21 +290,57 @@ body,
   line-height: 1;
 }
 
+.react-flow__node.cm-hovered .cm-node {
+  border-color: var(--cm-accent);
+  box-shadow: 0 0 0 1px var(--cm-accent), 0 0 12px color-mix(in srgb, var(--cm-accent) 35%, transparent);
+  filter: brightness(1.15);
+}
+
+.react-flow__node.cm-neighbor .cm-node {
+  border-color: color-mix(in srgb, var(--cm-accent) 55%, var(--cm-border));
+  filter: brightness(1.08);
+}
+
+.react-flow__node.cm-search-match .cm-node {
+  border-color: var(--cm-accent);
+  box-shadow: 0 0 0 1px var(--cm-accent);
+  filter: brightness(1.12);
+}
+
+.react-flow__node.cm-search-dim:not(.cm-hovered):not(.cm-neighbor) .cm-node {
+  opacity: 0.4;
+}
+
 .react-flow__edge.cm-edge-imports path {
-  stroke: #6cb6ff;
+  stroke: var(--cm-edge-imports);
 }
 
 .react-flow__edge.cm-edge-dynamicImport path {
-  stroke: #c792ea;
+  stroke: var(--cm-edge-dynamicImport);
 }
 
 .react-flow__edge.cm-edge-exports path {
-  stroke: #c3e88d;
+  stroke: var(--cm-edge-exports);
+}
+
+.react-flow__edge.cm-edge-contains path {
+  stroke: var(--cm-edge-contains);
+  stroke-dasharray: 4 4;
+  opacity: 0.35;
 }
 
 .react-flow__edge.cm-edge-cycle path {
-  stroke: #e06c75 !important;
+  stroke: var(--cm-edge-cycle) !important;
   stroke-width: 2;
+}
+
+.react-flow__edge.cm-edge-highlighted path {
+  stroke-width: 2.5;
+  opacity: 1;
+}
+
+.react-flow__edge.cm-edge-contains.cm-edge-highlighted path {
+  opacity: 0.7;
 }
 
 .react-flow__controls {
