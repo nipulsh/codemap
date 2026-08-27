@@ -13,6 +13,8 @@ export interface IndexedFile {
   parseError?: string;
 }
 
+
+
 /**
  * In-memory dependency index. Disk persistence arrives in Phase 2.
  */
