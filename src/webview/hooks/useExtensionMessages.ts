@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ExtensionToWebview, WebviewToExtension } from '../../../shared/messages';
 import { safeParseExtensionToWebview } from '../../../shared/messages';
+import type { RouteTraceDataWire, ViewMode } from '../../../shared/routeTrace';
+import type { RuntimeTraceSummaryWire } from '../../../shared/runtimeTrace';
+import type { TraceOverlayWire } from '../../../shared/traceOverlay';
 import {
   applyGraphPatch,
   type GraphPatch,
@@ -30,6 +33,8 @@ function mergePatch(
   return applyGraphPatch(snapshot, patch);
 }
 
+export type RouteTraceDisplayMode = 'static' | 'runtime-overlay';
+
 export function useExtensionMessages(): {
   snapshot: GraphSnapshot | null;
   lastPatch: GraphPatch | null;
@@ -39,6 +44,17 @@ export function useExtensionMessages(): {
   layoutEngine: string | null;
   setLayoutEngine: (engine: string | null) => void;
   clearLastPatch: () => void;
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
+  routeTraceData: RouteTraceDataWire | null;
+  routeTraceLoading: boolean;
+  requestRouteTraces: () => void;
+  runtimeTraces: RuntimeTraceSummaryWire[];
+  runtimeOverlay: TraceOverlayWire | null;
+  runtimeOverlayError: string | null;
+  refreshRuntimeTraces: () => void;
+  selectRuntimeTrace: (routeId: string, traceId: string) => void;
+  clearRuntimeOverlay: () => void;
 } {
   const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
   const [lastPatch, setLastPatch] = useState<GraphPatch | null>(null);
@@ -46,9 +62,37 @@ export function useExtensionMessages(): {
   const [progress, setProgress] = useState<string | null>('Connecting…');
   const [error, setError] = useState<string | null>(null);
   const [layoutEngine, setLayoutEngine] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('architecture');
+  const [routeTraceData, setRouteTraceData] = useState<RouteTraceDataWire | null>(null);
+  const [routeTraceLoading, setRouteTraceLoading] = useState(false);
+  const [runtimeTraces, setRuntimeTraces] = useState<RuntimeTraceSummaryWire[]>([]);
+  const [runtimeOverlay, setRuntimeOverlay] = useState<TraceOverlayWire | null>(null);
+  const [runtimeOverlayError, setRuntimeOverlayError] = useState<string | null>(null);
   const readySent = useRef(false);
 
   const clearLastPatch = useCallback(() => setLastPatch(null), []);
+
+  const requestRouteTraces = useCallback(() => {
+    setRouteTraceLoading(true);
+    postToExtension({ type: 'routeTrace:request' });
+  }, []);
+
+  const refreshRuntimeTraces = useCallback(() => {
+    postToExtension({ type: 'runtimeTrace:refresh' });
+  }, []);
+
+  const selectRuntimeTrace = useCallback((routeId: string, traceId: string) => {
+    setRuntimeOverlayError(null);
+    postToExtension({
+      type: 'runtimeTrace:select',
+      payload: { routeId, traceId },
+    });
+  }, []);
+
+  const clearRuntimeOverlay = useCallback(() => {
+    setRuntimeOverlay(null);
+    setRuntimeOverlayError(null);
+  }, []);
 
   const handleMessage = useCallback((raw: unknown) => {
     const parsed = safeParseExtensionToWebview(raw);
@@ -79,10 +123,28 @@ export function useExtensionMessages(): {
         setProgress(msg.payload.message || null);
         break;
       case 'error':
-        setError(`${msg.payload.scope}: ${msg.payload.message}`);
+        if (msg.payload.scope === 'runtime-overlay') {
+          setRuntimeOverlayError(`${msg.payload.scope}: ${msg.payload.message}`);
+        } else {
+          setError(`${msg.payload.scope}: ${msg.payload.message}`);
+        }
         setProgress(null);
         break;
       case 'search:results':
+        break;
+      case 'routeTrace:data':
+        setRouteTraceData(msg.payload);
+        setRuntimeTraces(msg.payload.runtimeTraces ?? []);
+        setRouteTraceLoading(false);
+        setViewMode('route-trace');
+        setError(null);
+        break;
+      case 'runtimeTrace:list':
+        setRuntimeTraces(msg.payload.runtimeTraces);
+        break;
+      case 'runtimeTrace:overlay':
+        setRuntimeOverlay(msg.payload);
+        setRuntimeOverlayError(null);
         break;
     }
   }, []);
@@ -110,5 +172,16 @@ export function useExtensionMessages(): {
     layoutEngine,
     setLayoutEngine,
     clearLastPatch,
+    viewMode,
+    setViewMode,
+    routeTraceData,
+    routeTraceLoading,
+    requestRouteTraces,
+    runtimeTraces,
+    runtimeOverlay,
+    runtimeOverlayError,
+    refreshRuntimeTraces,
+    selectRuntimeTrace,
+    clearRuntimeOverlay,
   };
 }

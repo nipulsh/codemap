@@ -5,6 +5,9 @@ import {
   GraphSnapshotSchema,
   SearchResultSchema,
 } from './graph';
+import { RouteTraceDataSchema } from './routeTrace';
+import { TraceOverlaySchema } from './traceOverlay';
+import { RuntimeTraceSummarySchema } from './runtimeTrace';
 
 export const ExtensionToWebviewSchema = z.discriminatedUnion('type', [
   z.object({
@@ -31,6 +34,20 @@ export const ExtensionToWebviewSchema = z.discriminatedUnion('type', [
     payload: z.object({
       message: z.string(),
       scope: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal('routeTrace:data'),
+    payload: RouteTraceDataSchema,
+  }),
+  z.object({
+    type: z.literal('runtimeTrace:overlay'),
+    payload: TraceOverlaySchema,
+  }),
+  z.object({
+    type: z.literal('runtimeTrace:list'),
+    payload: z.object({
+      runtimeTraces: z.array(RuntimeTraceSummarySchema),
     }),
   }),
 ]);
@@ -101,6 +118,25 @@ export const WebviewToExtensionSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('ready'),
+  }),
+  z.object({
+    type: z.literal('routeTrace:request'),
+  }),
+  z.object({
+    type: z.literal('runtimeTrace:refresh'),
+  }),
+  z.object({
+    type: z.literal('runtimeTrace:select'),
+    payload: z.object({
+      routeId: z.string(),
+      traceId: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal('viewMode:set'),
+    payload: z.object({
+      mode: z.enum(['architecture', 'route-trace']),
+    }),
   }),
 ]);
 export type WebviewToExtension = z.infer<typeof WebviewToExtensionSchema>;

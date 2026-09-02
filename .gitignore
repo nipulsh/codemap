@@ -3,3 +3,6 @@ dist
 node_modules
 .vscode-test/
 *.vsix
+# Machine-specific benchmark output (npm run benchmark). The committed summary
+# lives in docs/benchmarks.md.
+benchmark-results/

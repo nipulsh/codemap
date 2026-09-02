@@ -1,0 +1,10 @@
+export function deep0(): void { deep1(); }
+export function deep1(): void { deep2(); }
+export function deep2(): void { deep3(); }
+export function deep3(): void { deep4(); }
+export function deep4(): void { deep5(); }
+export function deep5(): void { deep6(); }
+export function deep6(): void { deep7(); }
+export function deep7(): void { deep8(); }
+export function deep8(): void { deep9(); }
+export function deep9(): void { return; }

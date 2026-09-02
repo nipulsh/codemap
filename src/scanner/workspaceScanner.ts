@@ -1,9 +1,18 @@
-import { readdirSync, realpathSync, existsSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync, existsSync, statSync } from 'node:fs';
 import { join, basename, relative } from 'node:path';
-import { contentHash, fileMtimeMs } from '../utils/hash';
+import { hashContent } from '../utils/hash';
 import { toPosix, normalizePath } from '../utils/path';
 import { isSourceFile, shouldIgnoreDirectory, shouldIgnoreFile } from './ignore';
 import type { ScanProgressCallback, ScanResult, ScannedFile, TsConfigInfo } from './types';
+
+export interface ScanWorkspaceOptions {
+  /**
+   * Optional sink for the file text the scanner already read while hashing.
+   * Later pipeline stages (parser, route analyzer) can reuse it instead of
+   * re-reading every file from disk.
+   */
+  publishText?: (absolutePath: string, text: string) => void;
+}
 
 function safeRealpath(p: string): string {
   try {
@@ -18,7 +27,8 @@ function walkDirectory(
   workspaceRoot: string,
   files: ScannedFile[],
   tsconfigs: TsConfigInfo[],
-  onProgress?: ScanProgressCallback,
+  onProgress: ScanProgressCallback | undefined,
+  publishText: ScanWorkspaceOptions['publishText'],
 ): void {
   let entries;
   try {
@@ -34,18 +44,19 @@ function walkDirectory(
       if (shouldIgnoreDirectory(entry.name)) {
         continue;
       }
-      walkDirectory(fullPath, workspaceRoot, files, tsconfigs, onProgress);
+      walkDirectory(fullPath, workspaceRoot, files, tsconfigs, onProgress, publishText);
       continue;
     }
 
-    if (!entry.isFile() && !entry.isSymbolicLink()) {
+    const isSymlink = entry.isSymbolicLink();
+    if (!entry.isFile() && !isSymlink) {
       continue;
     }
 
     const rel = toPosix(relative(workspaceRoot, fullPath));
 
     if (/^tsconfig.*\.json$/i.test(entry.name)) {
-      const real = safeRealpath(fullPath);
+      const real = isSymlink ? safeRealpath(fullPath) : normalizePath(fullPath);
       tsconfigs.push({
         configPath: real,
         baseDir: normalizePath(join(real, '..')),
@@ -61,14 +72,18 @@ function walkDirectory(
       continue;
     }
 
-    const real = safeRealpath(fullPath);
+    // `dir` descends from an already-canonical root and symlinked directories
+    // are not followed, so only symlinked entries need realpath resolution.
+    const real = isSymlink ? safeRealpath(fullPath) : normalizePath(fullPath);
     try {
+      const buffer = readFileSync(real);
       files.push({
         absolutePath: real,
         relativePath: toPosix(relative(workspaceRoot, real)),
-        mtimeMs: fileMtimeMs(real),
-        contentHash: contentHash(real),
+        mtimeMs: statSync(real).mtimeMs,
+        contentHash: hashContent(buffer),
       });
+      publishText?.(real, buffer.toString('utf8'));
       if (files.length % 100 === 0) {
         onProgress?.(`Scanning… ${files.length} files`, undefined);
       }
@@ -85,6 +100,7 @@ function walkDirectory(
 export function scanWorkspace(
   workspaceRoot: string,
   onProgress?: ScanProgressCallback,
+  options: ScanWorkspaceOptions = {},
 ): ScanResult {
   const root = safeRealpath(workspaceRoot);
   onProgress?.('Starting workspace scan…', 0);
@@ -93,7 +109,7 @@ export function scanWorkspace(
   const tsconfigs: TsConfigInfo[] = [];
 
   if (existsSync(root)) {
-    walkDirectory(root, root, files, tsconfigs, onProgress);
+    walkDirectory(root, root, files, tsconfigs, onProgress, options.publishText);
   }
 
   // Prefer deeper / more specific tsconfigs; keep discovery order stable

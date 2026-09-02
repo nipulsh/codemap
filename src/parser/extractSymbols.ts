@@ -257,6 +257,21 @@ export function resolveFunctionCallees(
 
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
+      if (ts.isElementAccessExpression(node.expression)) {
+        const text = node.expression.getText(sourceFile);
+        const key = `dynamic:${text}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          callees.push({
+            name: text,
+            local: true,
+            line: lineOf(sourceFile, node.getStart(sourceFile)),
+          });
+        }
+        ts.forEachChild(node, visit);
+        return;
+      }
+
       const info = calleeNameFromExpression(node.expression);
       if (info) {
         const isAwait =
@@ -296,7 +311,7 @@ export function resolveFunctionCallees(
           !(info.memberOf === 'console')
         ) {
           const key = `${targetFile ?? ''}:${name}:${local}`;
-          if (!seen.has(key) && name !== functionName) {
+          if (!seen.has(key)) {
             seen.add(key);
             callees.push({
               name,

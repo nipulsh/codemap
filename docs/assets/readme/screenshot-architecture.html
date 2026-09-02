@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en" class="view-architecture">
+<head>
+  <meta charset="UTF-8" />
+  <title>CodeMap Screenshot Studio</title>
+  <style>
+    :root {
+      --vscode-bg: #1e1e1e; --vscode-sidebar: #252526; --vscode-activity: #333;
+      --vscode-tab: #2d2d2d; --vscode-tab-active: #1e1e1e; --vscode-border: #3c3c3c;
+      --vscode-fg: #ccc; --vscode-muted: #9d9d9d; --vscode-accent: #0e639c;
+      --cm-workspace: #4a5568; --cm-folder: #3a5f7a; --cm-file: #2d4a3e;
+      --cm-function: #3d5a80; --cm-route: #1e4d6b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #111; font-family: "Segoe UI", sans-serif; color: var(--vscode-fg);
+      min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .vscode-shell { width: 1280px; height: 760px; background: var(--vscode-bg); border: 1px solid #000;
+      border-radius: 8px; overflow: hidden; display: grid; grid-template-columns: 48px 220px 1fr;
+      grid-template-rows: 36px 1fr 22px; box-shadow: 0 24px 80px rgba(0,0,0,.55); }
+    .titlebar { grid-column: 1 / -1; background: #323233; display: flex; align-items: center;
+      padding: 0 12px; font-size: 12px; gap: 8px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot.r { background: #ff5f57; } .dot.y { background: #febc2e; } .dot.g { background: #28c840; }
+    .activity { background: var(--vscode-activity); grid-row: 2; }
+    .sidebar { background: var(--vscode-sidebar); border-right: 1px solid var(--vscode-border); padding: 12px 10px; font-size: 12px; }
+    .sidebar h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--vscode-muted); margin-bottom: 10px; }
+    .tree-item { padding: 3px 0 3px 14px; } .tree-item.root { padding-left: 0; font-weight: 600; }
+    .main { display: flex; flex-direction: column; min-width: 0; background: var(--vscode-tab-active); }
+    .tabs { display: flex; background: var(--vscode-tab); border-bottom: 1px solid var(--vscode-border);
+      height: 34px; align-items: end; padding-left: 8px; gap: 2px; }
+    .tab { padding: 7px 14px; font-size: 12px; background: #2a2a2a; color: #aaa; border-top-left-radius: 4px; border-top-right-radius: 4px; }
+    .tab.active { background: var(--vscode-tab-active); color: #fff; }
+    .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--vscode-border); }
+    .brand { font-weight: 600; margin-right: 8px; }
+    .btn { background: var(--vscode-accent); color: #fff; border: none; padding: 4px 10px; border-radius: 2px; font-size: 12px; }
+    .btn.secondary { background: transparent; border: 1px solid var(--vscode-border); color: #ccc; }
+    .btn.active { box-shadow: inset 0 0 0 1px var(--vscode-accent); }
+    .meta { color: var(--vscode-muted); font-size: 11px; margin-left: auto; }
+    .banner { padding: 6px 12px; font-size: 11px; color: var(--vscode-muted);
+      background: rgba(14,99,156,.18); border-bottom: 1px solid var(--vscode-border); }
+    .canvas-wrap { flex: 1; position: relative; background: #1a1a1a; overflow: hidden; }
+    .legend { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; z-index: 2; flex-wrap: wrap; justify-content: flex-end; }
+    .legend span { font-size: 10px; padding: 2px 6px; border-radius: 2px; border: 1px solid var(--vscode-border); background: rgba(30,30,30,.85); }
+    .statusbar { grid-column: 1 / -1; background: #007acc; color: #fff; font-size: 11px; display: flex; align-items: center; padding: 0 10px; }
+    .node { position: absolute; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 4px;
+      border: 1px solid #444; font-size: 11px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
+    .node .icon { opacity: .85; font-weight: 700; width: 14px; text-align: center; }
+    .n-workspace { background: var(--cm-workspace); font-weight: 700; }
+    .n-folder { background: var(--cm-folder); } .n-file { background: var(--cm-file); }
+    .n-fn { background: var(--cm-function); } .n-route { background: var(--cm-route); border-color: #3d8ec9; }
+    .badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; background: rgba(255,255,255,.12); }
+    .badge.obs { background: #1b5e20; color: #a5d6a7; } .badge.unobs { background: #4a3728; color: #ffcc80; }
+    .badge.rt { background: #4a148c; color: #e1bee7; }
+    svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    .route-sidebar { width: 280px; border-right: 1px solid var(--vscode-border); display: flex; flex-direction: column; font-size: 12px; background: #1c1c1c; }
+    .route-sidebar header { padding: 10px 12px; border-bottom: 1px solid var(--vscode-border); font-weight: 600; }
+    .route-item { padding: 8px 12px; border-bottom: 1px solid #2a2a2a; }
+    .route-item.active { background: rgba(14,99,156,.25); border-left: 3px solid #0e639c; }
+    .route-item .method { color: #4fc3f7; font-weight: 700; font-size: 10px; }
+    .route-item .path { color: #ddd; margin-top: 2px; font-family: Consolas, monospace; font-size: 11px; }
+    .controls-row { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--vscode-border); }
+    .controls-row label { color: var(--vscode-muted); font-size: 11px; }
+    .pill { padding: 2px 8px; border-radius: 10px; font-size: 10px; border: 1px solid var(--vscode-border); }
+    .pill.on { background: var(--vscode-accent); border-color: var(--vscode-accent); color: #fff; }
+    .split { display: flex; flex: 1; min-height: 0; }
+    html.view-architecture #view-route, html.view-architecture #view-runtime { display: none !important; }
+    html.view-route #view-architecture, html.view-route #view-runtime { display: none !important; }
+    html.view-runtime #view-architecture, html.view-runtime #view-route { display: none !important; }
+  </style>
+  </head>
+<body>
+  <div class="vscode-shell">
+    <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span style="margin-left:12px">codemap — Visual Studio Code</span></div>
+    <div class="activity"></div>
+    <aside class="sidebar">
+      <h3>Explorer</h3>
+      <div class="tree-item root">▼ small-app</div>
+      <div class="tree-item">▼ src</div>
+      <div class="tree-item">  index.ts</div>
+      <div class="tree-item">  routes.ts</div>
+      <div class="tree-item">▼ controllers</div>
+      <div class="tree-item">  userController.ts</div>
+      <div class="tree-item">▼ services</div>
+      <div class="tree-item">  userService.ts</div>
+    </aside>
+    <div class="main">
+      <div class="tabs"><div class="tab">index.ts</div><div class="tab active">CodeMap — Architecture</div></div>
+
+      <div class="panel" id="view-architecture">
+        <div class="toolbar"><span class="brand">CodeMap</span><button class="btn">Refresh</button><button class="btn secondary">Route Trace</button><span class="meta">layout: elk</span></div>
+        <div class="banner">Progressive explorer — double-click to expand. Static analysis only.</div>
+        <div class="canvas-wrap">
+          <div class="legend"><span style="border-color:#8a8a8a">hierarchy</span><span style="border-color:#9b59b6">imports</span><span style="border-color:#5b9bd5">calls</span></div>
+          <svg class="edges" viewBox="0 0 900 520"><path d="M130,180 H250" stroke="#8a8a8a" stroke-width="2" fill="none"/><path d="M130,180 H250 V280 H390" stroke="#8a8a8a" stroke-width="2" fill="none"/><path d="M390,280 H520" stroke="#8a8a8a" stroke-width="2" fill="none"/><path d="M520,280 H650" stroke="#9b59b6" stroke-width="2" fill="none" stroke-dasharray="6 4"/><path d="M650,280 H780 V380" stroke="#5b9bd5" stroke-width="2" fill="none"/></svg>
+          <div class="node n-workspace" style="left:24px;top:160px"><span class="icon">W</span>small-app</div>
+          <div class="node n-folder" style="left:250px;top:160px"><span class="icon">D</span>src/</div>
+          <div class="node n-file" style="left:390px;top:260px"><span class="icon">F</span>index.ts</div>
+          <div class="node n-file" style="left:520px;top:260px"><span class="icon">F</span>userService.ts</div>
+          <div class="node n-fn" style="left:650px;top:360px"><span class="icon">ƒ</span>getUser()</div>
+        </div>
+      </div>
+
+      <div class="panel" id="view-route">
+        <div class="toolbar"><span class="brand">CodeMap</span><button class="btn secondary">← Architecture</button><button class="btn active">Route Trace</button><span class="meta">4 routes · static</span></div>
+        <div class="banner">Static route trace — possible call structure from source analysis, not runtime execution.</div>
+        <div class="split">
+          <div class="route-sidebar">
+            <header>Routes</header>
+            <div class="route-item active"><div class="method">POST</div><div class="path">/api/login</div></div>
+            <div class="route-item"><div class="method">GET</div><div class="path">/users/:id</div></div>
+            <div class="route-item"><div class="method">GET</div><div class="path">/health</div></div>
+            <div class="controls-row"><label>Depth</label><span class="pill on">4</span><span class="pill">8</span></div>
+          </div>
+          <div class="canvas-wrap">
+            <svg class="edges" viewBox="0 0 700 480"><path d="M350,60 V120" stroke="#8a8a8a" stroke-width="2" fill="none"/><path d="M350,170 V230" stroke="#5b9bd5" stroke-width="2" fill="none"/><path d="M350,280 V340" stroke="#5b9bd5" stroke-width="2" fill="none"/><path d="M350,390 V450" stroke="#5b9bd5" stroke-width="2" fill="none"/></svg>
+            <div class="node n-route" style="left:260px;top:24px"><span class="icon">⇢</span>POST /api/login<span class="badge">D0</span></div>
+            <div class="node n-fn" style="left:260px;top:120px"><span class="icon">ƒ</span>loginHandler<span class="badge">D1</span></div>
+            <div class="node n-fn" style="left:260px;top:230px"><span class="icon">ƒ</span>validateInput<span class="badge">D2</span></div>
+            <div class="node n-fn" style="left:260px;top:340px"><span class="icon">ƒ</span>AuthService.check<span class="badge">D3</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="view-runtime">
+        <div class="toolbar"><span class="brand">CodeMap</span><button class="btn secondary">← Architecture</button><button class="btn active">Route Trace</button><span class="meta">Runtime Overlay</span></div>
+        <div class="banner">Observed execution overlay — badges show what ran for the selected trace.</div>
+        <div class="split">
+          <div class="route-sidebar">
+            <header>Runtime traces</header>
+            <div class="route-item active"><div class="method">GET</div><div class="path">/users/:id · 12 ms</div></div>
+            <div class="route-item"><div class="method">GET</div><div class="path">/users/:id · 9 ms</div></div>
+            <div class="controls-row"><span class="pill">Static</span><span class="pill on">Runtime Overlay</span></div>
+          </div>
+          <div class="canvas-wrap">
+            <div class="legend"><span class="badge obs">✓ observed</span><span class="badge unobs">○ unobserved</span><span class="badge rt">⚡ runtime-only</span></div>
+            <svg class="edges" viewBox="0 0 700 480"><path d="M350,60 V120" stroke="#8a8a8a" stroke-width="2" fill="none"/><path d="M350,170 V230" stroke="#4caf50" stroke-width="2.5" fill="none"/><path d="M350,280 V340" stroke="#ff9800" stroke-width="2" fill="none" stroke-dasharray="5 4"/><path d="M520,230 H620" stroke="#ab47bc" stroke-width="2" fill="none"/></svg>
+            <div class="node n-route" style="left:260px;top:24px"><span class="icon">⇢</span>GET /users/:id<span class="badge obs">✓</span></div>
+            <div class="node n-fn" style="left:260px;top:120px"><span class="icon">ƒ</span>getUserHandler<span class="badge obs">12 ms</span></div>
+            <div class="node n-fn" style="left:260px;top:230px"><span class="icon">ƒ</span>getUser<span class="badge obs">8 ms</span></div>
+            <div class="node n-fn" style="left:260px;top:340px;border-style:dashed;opacity:.75"><span class="icon">ƒ</span>findUser<span class="badge unobs">○</span></div>
+            <div class="node n-fn" style="left:520px;top:200px;border-color:#ab47bc"><span class="icon">ƒ</span>logAccess<span class="badge rt">⚡</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="statusbar">CodeMap · TypeScript · main ↑1 · 192 tests passing</div>
+  </div>
+</body>
+</html>
