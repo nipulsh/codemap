@@ -21,14 +21,87 @@ const NODE_SIZES: Record<string, { width: number; height: number }> = {
   Interface: { width: 150, height: 36 },
   Enum: { width: 140, height: 36 },
   Component: { width: 160, height: 36 },
+  Route: { width: 200, height: 44 },
 };
 
 export function nodeSize(kind: string): { width: number; height: number } {
   return NODE_SIZES[kind] ?? { width: 150, height: 36 };
 }
 
+/** Edges that define the explorer tree; imports/calls are drawn but must not drive layout. */
+const TREE_EDGE_KINDS = new Set<GraphEdge['kind']>(['hierarchy', 'contains']);
+
+/** Above these counts ELK/Dagre become seconds-to-minutes on dense import graphs. */
+const ELK_MAX_NODES = 400;
+const ELK_MAX_TREE_EDGES = 600;
+
+function hierarchyLayoutEdges(edges: GraphEdge[]): GraphEdge[] {
+  return edges.filter((e) => TREE_EDGE_KINDS.has(e.kind));
+}
+
+function kindFromNodeId(nodeId: string): string {
+  if (nodeId.startsWith('workspace:')) {
+    return 'Workspace';
+  }
+  if (nodeId.startsWith('folder:')) {
+    return 'Folder';
+  }
+  if (nodeId.startsWith('file:')) {
+    return 'File';
+  }
+  return 'Function';
+}
+
 /**
- * Full layout for initial snapshot (ELK with Dagre fallback).
+ * Fast O(n) tree placement using hierarchy/contains edges only.
+ * Used for large graphs and as the Dagre fallback when ELK fails.
+ */
+function layoutHierarchyTree(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+): LayoutResult {
+  const treeEdges = hierarchyLayoutEdges(edges);
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const parentOf = new Map<string, string>();
+
+  for (const e of treeEdges) {
+    if (!nodeById.has(e.source) || !nodeById.has(e.target)) {
+      continue;
+    }
+    parentOf.set(e.target, e.source);
+  }
+
+  const roots = nodes.filter((n) => !parentOf.has(n.id));
+  const positions = layoutNewNodes(new Map(), nodes, treeEdges);
+
+  // Roots with no parent edge still need a seed position.
+  let rootY = 0;
+  for (const root of roots) {
+    if (!positions.has(root.id)) {
+      positions.set(root.id, { x: 0, y: rootY });
+      rootY += 56;
+    }
+  }
+
+  const positioned = nodes.map((n) => {
+    const size = nodeSize(n.kind ?? kindFromNodeId(n.id));
+    return {
+      ...n,
+      position: positions.get(n.id) ?? { x: 0, y: 0 },
+      width: size.width,
+      height: size.height,
+    };
+  });
+
+  return { nodes: positioned, edges, engine: 'incremental' };
+}
+
+/**
+ * Full layout for initial snapshot.
+ *
+ * Only hierarchy/contains edges influence placement — import/call edges are
+ * visual only. Above {@link ELK_MAX_NODES} nodes or {@link ELK_MAX_TREE_EDGES}
+ * tree edges, ELK is skipped in favour of the incremental tree layout.
  */
 export async function layoutGraph(
   snapshot: GraphSnapshot,
@@ -40,10 +113,19 @@ export async function layoutGraph(
     return { nodes: [], edges: [], engine: 'elk' };
   }
 
+  const treeEdges = hierarchyLayoutEdges(edges);
+  if (nodes.length > ELK_MAX_NODES || treeEdges.length > ELK_MAX_TREE_EDGES) {
+    return layoutHierarchyTree(nodes, edges);
+  }
+
   try {
-    return await layoutWithElk(nodes, edges);
+    return await layoutWithElk(nodes, treeEdges);
   } catch {
-    return layoutWithDagre(nodes, edges);
+    try {
+      return layoutWithDagre(nodes, treeEdges);
+    } catch {
+      return layoutHierarchyTree(nodes, edges);
+    }
   }
 }
 
@@ -62,6 +144,7 @@ export function layoutNewNodes(
   }
 
   // Find parent from hierarchy/contains/calls edges
+  const newNodeIds = new Set(newNodes.map((n) => n.id));
   const parentOf = new Map<string, string>();
   for (const e of edges) {
     if (
@@ -71,7 +154,7 @@ export function layoutNewNodes(
       e.kind === 'imports' ||
       e.kind === 'dynamicImport'
     ) {
-      if (newNodes.some((n) => n.id === e.target)) {
+      if (newNodeIds.has(e.target)) {
         parentOf.set(e.target, e.source);
       }
     }
@@ -165,16 +248,17 @@ async function layoutWithElk(
     })),
   };
 
-  const ELK_TIMEOUT_MS = 2000;
-  const layoutPromise = elk.layout(graph);
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error('ELK timeout')), ELK_TIMEOUT_MS);
-  });
+  // elkjs bundled runs synchronously on the main thread; Promise.race cannot
+  // interrupt it, so size guards in layoutGraph() are the real safety net.
+  const laid = await elk.layout(graph);
 
-  const laid = await Promise.race([layoutPromise, timeoutPromise]);
+  const laidById = new Map<string, { x?: number; y?: number }>();
+  for (const child of laid.children ?? []) {
+    laidById.set(child.id, child);
+  }
 
   const positioned = nodes.map((n) => {
-    const child = laid.children?.find((c: { id: string }) => c.id === n.id);
+    const child = laidById.get(n.id);
     const size = nodeSize(n.kind);
     return {
       ...n,
@@ -191,7 +275,13 @@ async function layoutWithDagre(
   nodes: GraphNode[],
   edges: GraphEdge[],
 ): Promise<LayoutResult> {
-  const dagre = await import('@dagrejs/dagre');
+  // @dagrejs/dagre is CommonJS. esbuild's __toESM interop exposes its members
+  // directly on the namespace, but Node's native ESM loader only guarantees
+  // them on `default`; accept both so the fallback works everywhere.
+  const dagreModule: typeof import('@dagrejs/dagre') = await import('@dagrejs/dagre');
+  const dagre =
+    (dagreModule as unknown as { default?: typeof dagreModule }).default ??
+    dagreModule;
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({ rankdir: 'LR', nodesep: 40, ranksep: 60 });

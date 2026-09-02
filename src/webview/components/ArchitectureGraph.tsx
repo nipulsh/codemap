@@ -22,11 +22,13 @@ import {
   FolderNode,
   FunctionNode,
   InterfaceNode,
+  RouteNode,
   WorkspaceNode,
   kindToNodeType,
   type ArchitectureNodeData,
 } from './Nodes';
 import { postToExtension } from '../hooks/useExtensionMessages';
+import type { TraceLayoutNode } from '../routeTrace/layoutTraceByDepth';
 
 const nodeTypes: NodeTypes = {
   workspace: WorkspaceNode,
@@ -37,6 +39,7 @@ const nodeTypes: NodeTypes = {
   interface: InterfaceNode,
   enum: EnumNode,
   component: ComponentNode,
+  route: RouteNode,
 };
 
 interface Props {
@@ -45,6 +48,10 @@ interface Props {
   fullVersion: number;
   onLayoutEngine?: (engine: string) => void;
   clearLastPatch?: () => void;
+  traceMode?: boolean;
+  overlayMode?: boolean;
+  traceLayout?: { nodes: TraceLayoutNode[]; edges: GraphSnapshot['edges'] } | null;
+  onNodeSelect?: (nodeId: string) => void;
 }
 
 function ArchitectureGraphInner({
@@ -53,6 +60,10 @@ function ArchitectureGraphInner({
   fullVersion,
   onLayoutEngine,
   clearLastPatch,
+  traceMode = false,
+  overlayMode = false,
+  traceLayout = null,
+  onNodeSelect,
 }: Props) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -84,9 +95,17 @@ function ArchitectureGraphInner({
       kind: n.kind,
       filePath: n.filePath,
       line: n.line,
-      cycle: !!n.metadata?.cycle,
+      cycle: !!n.metadata?.cycle || !!n.metadata?.isCycle,
       expanded: !!n.metadata?.expanded,
       lazy: !!n.metadata?.lazy,
+      traceDepth: n.metadata?.traceDepth as number | undefined,
+      traceResolution: n.metadata?.traceResolution as ArchitectureNodeData['traceResolution'],
+      relativePath: n.metadata?.relativePath as string | undefined,
+      staticTrace: !!n.metadata?.staticTrace || n.kind === 'Route',
+      overlayObservation: n.metadata?.overlayObservation as ArchitectureNodeData['overlayObservation'],
+      overlayMetricsLabel: n.metadata?.overlayMetricsLabel as string | undefined,
+      overlayError: n.metadata?.overlayError as ArchitectureNodeData['overlayError'],
+      runtimeOnly: !!n.metadata?.runtimeOnly,
     } satisfies ArchitectureNodeData,
     style: { width: n.width, height: n.height },
   }), []);
@@ -94,6 +113,8 @@ function ArchitectureGraphInner({
   const toRfEdges = useCallback((graphEdges: GraphSnapshot['edges']): Edge[] => {
     return graphEdges.map((e) => {
       const asyncFlow = !!e.metadata?.async;
+      const isCycle = !!e.metadata?.cycle || !!e.metadata?.isCycle;
+      const overlayObservation = e.metadata?.overlayObservation as string | undefined;
       return {
         id: e.id,
         source: e.source,
@@ -102,23 +123,73 @@ function ArchitectureGraphInner({
         className: [
           `cm-edge-${e.kind}`,
           asyncFlow ? 'cm-edge-async' : '',
-          e.metadata?.cycle ? 'cm-edge-cycle' : '',
+          isCycle ? 'cm-edge-cycle' : '',
+          overlayObservation ? `cm-edge-overlay-${overlayObservation}` : '',
         ]
           .filter(Boolean)
           .join(' '),
         label:
-          e.kind === 'dynamicImport'
-            ? 'dynamic'
-            : asyncFlow
-              ? 'async'
-              : undefined,
-        style: edgeStyle(e.kind, asyncFlow),
+          overlayObservation === 'observed'
+            ? '✓'
+            : overlayObservation === 'unobserved'
+              ? '○'
+              : overlayObservation === 'runtime-only'
+                ? '⚡'
+                : isCycle
+                  ? 'cycle'
+                  : e.kind === 'dynamicImport'
+                    ? 'dynamic'
+                    : asyncFlow
+                      ? 'async'
+                      : undefined,
+        style: edgeStyle(e.kind, asyncFlow, isCycle),
       };
     });
   }, []);
 
+  // Trace layout — depth-based, no ELK
+  useEffect(() => {
+    if (!traceMode || !traceLayout) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      if (cancelled) {
+        return;
+      }
+      onLayoutEngine?.('trace-depth');
+      const pos = new Map<string, { x: number; y: number }>();
+      for (const n of traceLayout.nodes) {
+        pos.set(n.id, n.position);
+      }
+      positionsRef.current = pos;
+      setNodes(traceLayout.nodes.map(toRfNode));
+      setEdges(toRfEdges(traceLayout.edges));
+      layoutFullVersionRef.current = fullVersion;
+      requestAnimationFrame(() => {
+        void fitView({ padding: 0.2, duration: 200 });
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    traceMode,
+    traceLayout,
+    fullVersion,
+    onLayoutEngine,
+    setNodes,
+    setEdges,
+    toRfNode,
+    toRfEdges,
+    fitView,
+  ]);
+
   // Initial / full-refresh layout only
   useEffect(() => {
+    if (traceMode) {
+      return;
+    }
     if (layoutFullVersionRef.current === fullVersion) {
       return;
     }
@@ -155,10 +226,14 @@ function ArchitectureGraphInner({
     toRfNode,
     toRfEdges,
     fitView,
+    traceMode,
   ]);
 
   // Incremental patch layout — never moves existing nodes
   useEffect(() => {
+    if (traceMode) {
+      return;
+    }
     if (!lastPatch || layoutFullVersionRef.current !== fullVersion) {
       return;
     }
@@ -212,11 +287,25 @@ function ArchitectureGraphInner({
     toRfNode,
     toRfEdges,
     clearLastPatch,
+    traceMode,
   ]);
 
   const onNodeDoubleClick = useCallback(
     (event: React.MouseEvent, node: Node) => {
       const data = node.data as ArchitectureNodeData;
+
+      if (traceMode) {
+        if (data.traceResolution === 'external' || data.traceResolution === 'unresolved') {
+          return;
+        }
+        if (data.filePath) {
+          postToExtension({
+            type: 'node:open',
+            payload: { filePath: data.filePath, line: data.line },
+          });
+        }
+        return;
+      }
 
       // Ctrl/Cmd + double-click opens in editor
       if (event.ctrlKey || event.metaKey) {
@@ -264,21 +353,48 @@ function ArchitectureGraphInner({
         });
       }
     },
-    [],
+    [traceMode],
+  );
+
+  const onNodeClick = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      if (overlayMode && onNodeSelect) {
+        onNodeSelect(node.id);
+      }
+    },
+    [overlayMode, onNodeSelect],
   );
 
   const legend = useMemo(
     () => (
       <div className="cm-legend">
-        <span className="cm-legend-item cm-legend-hierarchy">hierarchy</span>
-        <span className="cm-legend-item cm-legend-contains">contains</span>
-        <span className="cm-legend-item cm-legend-calls">calls</span>
-        <span className="cm-legend-item cm-legend-imports">imports</span>
-        <span className="cm-legend-item cm-legend-dynamic">dynamic</span>
-        <span className="cm-legend-item cm-legend-async">async</span>
+        {traceMode && overlayMode ? (
+          <>
+            <span className="cm-legend-item cm-legend-overlay-observed">observed</span>
+            <span className="cm-legend-item cm-legend-overlay-unobserved">unobserved</span>
+            <span className="cm-legend-item cm-legend-overlay-runtime">runtime-only</span>
+            <span className="cm-legend-item cm-legend-overlay-unresolved">unresolved</span>
+          </>
+        ) : traceMode ? (
+          <>
+            <span className="cm-legend-item cm-legend-route">route</span>
+            <span className="cm-legend-item cm-legend-calls">static calls</span>
+            <span className="cm-legend-item cm-legend-cycle">cycle</span>
+            <span className="cm-legend-item cm-legend-external">external</span>
+          </>
+        ) : (
+          <>
+            <span className="cm-legend-item cm-legend-hierarchy">hierarchy</span>
+            <span className="cm-legend-item cm-legend-contains">contains</span>
+            <span className="cm-legend-item cm-legend-calls">calls</span>
+            <span className="cm-legend-item cm-legend-imports">imports</span>
+            <span className="cm-legend-item cm-legend-dynamic">dynamic</span>
+            <span className="cm-legend-item cm-legend-async">async</span>
+          </>
+        )}
       </div>
     ),
-    [],
+    [traceMode, overlayMode],
   );
 
   return (
@@ -290,6 +406,7 @@ function ArchitectureGraphInner({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeDoubleClick={onNodeDoubleClick}
+        onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
         fitView={false}
         minZoom={0.05}
@@ -329,7 +446,11 @@ function ArchitectureGraphInner({
 function edgeStyle(
   kind: string,
   asyncFlow: boolean,
+  isCycle = false,
 ): React.CSSProperties | undefined {
+  if (isCycle) {
+    return { stroke: '#c678dd', strokeWidth: 2, strokeDasharray: '4 4' };
+  }
   if (asyncFlow) {
     return { stroke: '#e2a66e', strokeWidth: 2 };
   }
@@ -344,6 +465,10 @@ function edgeStyle(
       return { stroke: '#9b59b6', strokeDasharray: '6 4', strokeWidth: 1.5 };
     case 'dynamicImport':
       return { stroke: '#f1c40f', strokeDasharray: '2 3', strokeWidth: 1.5 };
+    case 'handles':
+      return { stroke: '#56b6c2', strokeWidth: 2 };
+    case 'servedBy':
+      return { stroke: '#6a6a6a', strokeWidth: 1, strokeDasharray: '2 4' };
     case 'exports':
       return { stroke: '#c3e88d', strokeWidth: 1.5 };
     default:

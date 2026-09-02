@@ -15,15 +15,58 @@ export interface CachedFileParse {
   parseError?: string;
 }
 
+/**
+ * Structural check for entries read back from disk. A cache file that parses
+ * as JSON but does not look like a CachedFileParse must not reach callers that
+ * iterate `imports`/`symbols` etc.
+ */
+export function isCachedFileParse(value: unknown): value is CachedFileParse {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.absolutePath === 'string' &&
+    typeof v.relativePath === 'string' &&
+    typeof v.contentHash === 'string' &&
+    typeof v.mtimeMs === 'number' &&
+    Array.isArray(v.imports) &&
+    Array.isArray(v.exports) &&
+    Array.isArray(v.symbols) &&
+    Array.isArray(v.dependencyPaths) &&
+    Array.isArray(v.dynamicImportPaths) &&
+    (v.parseError === undefined || typeof v.parseError === 'string')
+  );
+}
+
 export class FileCache {
   private readonly map = new Map<string, CachedFileParse>();
-  private readonly diskCache = new FileSystemDiskCache();
+  private readonly diskCache: FileSystemDiskCache;
 
-  constructor() {
+  constructor(diskCache: FileSystemDiskCache = new FileSystemDiskCache()) {
+    this.diskCache = diskCache;
     // Initialize the disk cache asynchronously
     this.diskCache.load().catch(err => {
       console.warn('Failed to initialize disk cache:', err);
     });
+  }
+
+  /** Read from disk, discarding entries that do not have the expected shape. */
+  private async readDisk(normalizedPath: string): Promise<CachedFileParse | undefined> {
+    let raw: unknown;
+    try {
+      raw = await this.diskCache.get<unknown>(normalizedPath);
+    } catch {
+      return undefined;
+    }
+    if (raw === undefined) {
+      return undefined;
+    }
+    if (!isCachedFileParse(raw)) {
+      this.diskCache.invalidate(normalizedPath).catch(() => undefined);
+      return undefined;
+    }
+    return raw;
   }
 
   get(absolutePath: string): CachedFileParse | undefined {
@@ -49,7 +92,7 @@ export class FileCache {
     }
 
     // If not in memory, try disk cache
-    const diskCached = await this.diskCache.get<CachedFileParse>(normalizedPath);
+    const diskCached = await this.readDisk(normalizedPath);
     if (diskCached) {
       // Store in memory cache for faster access next time
       this.map.set(normalizedPath, diskCached);
@@ -124,7 +167,7 @@ export class FileCache {
     if (this.map.has(normalizedPath)) {
       return true;
     }
-    const cached = await this.diskCache.get<CachedFileParse>(normalizedPath);
+    const cached = await this.readDisk(normalizedPath);
     if (cached !== undefined) {
       this.map.set(normalizedPath, cached);
       return true;

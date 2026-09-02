@@ -2,7 +2,7 @@ import typescriptEslint from "typescript-eslint";
 
 export default [
   {
-    ignores: ["out/**", "out-tsc/**", "node_modules/**", ".vscode-test/**"],
+    ignores: ["out/**", "out-tsc/**", "node_modules/**", ".vscode-test/**", "tests/fixtures/malformed/**"],
   },
   {
     files: ["**/*.{ts,tsx}"],

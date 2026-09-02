@@ -9,6 +9,7 @@ export const NodeKindSchema = z.enum([
   'Interface',
   'Enum',
   'Component',
+  'Route',
 ]);
 export type NodeKind = z.infer<typeof NodeKindSchema>;
 
@@ -19,6 +20,8 @@ export const EdgeKindSchema = z.enum([
   'exports',
   'calls',
   'dynamicImport',
+  'handles',
+  'servedBy',
 ]);
 export type EdgeKind = z.infer<typeof EdgeKindSchema>;
 

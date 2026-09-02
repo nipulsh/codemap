@@ -55,6 +55,25 @@ Press **F5** to launch the Extension Development Host, then run **CodeMap: Open 
 | `npm run typecheck` | TypeScript check (extension + webview) |
 | `npm run test:unit` | Fixture and protocol unit tests |
 | `npm run lint` | ESLint over `src`, `shared`, and `tests` |
+| `npm run benchmark` | Run all performance benchmark suites and write `benchmark-results/REPORT.md` |
+| `npm run benchmark:workspace` | Workspace analysis, lazy-vs-eager, document size |
+| `npm run benchmark:static` | Route analysis, call chains, graph projection |
+| `npm run benchmark:runtime` | Trace overlay, collector stress, instrumentation overhead |
+
+## Production scope (Phases 5–9D)
+
+CodeMap currently ships two complementary modes:
+
+| Mode | Entry point | Purpose |
+|------|-------------|---------|
+| **Lazy explorer** | `ExplorerService` | Interactive folder/file/symbol expansion on demand |
+| **Eager analysis** | `WorkspaceAnalysisService` | Full-workspace scan, routes, optional static call chains, architecture docs |
+
+**Static vs runtime:** route traces and call chains are source-derived (*possible* structure). Runtime traces are observed execution from opt-in Express instrumentation. The Route Trace UI can overlay runtime observations onto static traces without replacing them.
+
+**Express runtime instrumentation:** call `instrumentExpress(app, { collector })` in your server. Telemetry is limited to HTTP method, matched route template, status code, and explicit span metadata — not headers, cookies, or bodies.
+
+**Known limitations:** dynamic dispatch, DI, and runtime-only calls may be missing from static graphs. Large graphs (>400 nodes) use incremental tree layout instead of ELK. Benchmark numbers are environment-specific; run `npm run benchmark` locally for current measurements.
 
 ## Usage
 
@@ -100,8 +119,9 @@ For engineer-oriented deep dives, see [`docs/`](docs/README.md).
 | Phase | Focus |
 |-------|-------|
 | **Done** | Lazy explorer, multi-layer cache, file watcher, prefetch, call edges, disk persistence |
-| **Next** | Search / filter UI, multi-worker pool, layout and clustering polish |
-| **Future** | Richer call resolution, import/export graphs, theme support, Marketplace publish |
+| **Done** | Workspace analysis, Express routes, static call tracing, route trace UI, runtime overlay |
+| **In progress** | Production hardening, benchmarks, reliability tests (Phase 10) |
+| **Future** | Fastify/Next.js instrumentation, search/filter UI polish, Marketplace publish |
 
 ## Documentation
 

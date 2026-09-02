@@ -3,7 +3,16 @@ import { join } from 'node:path';
 import { MessageBus } from './messageBus';
 import { WorkerPool } from '../parser/workerPool';
 import { ExplorerService } from '../explorer/ExplorerService';
+import { WorkspaceAnalysisService } from '../analysis/WorkspaceAnalysisService';
+import type { RouteTraceDataWire } from '../../shared/routeTrace';
+import {
+  buildTraceOverlay,
+  getRuntimeTraceById,
+  listRuntimeTraceSummaries,
+} from '../runtime/RuntimeTraceRegistry';
+import type { StaticRouteTrace } from '../routes/types';
 import { normalizePath } from '../utils/path';
+import { isAnalysisCancelledError } from '../utils/cancellation';
 import { isSourceFile } from '../scanner/ignore';
 import { basename } from 'node:path';
 
@@ -17,6 +26,8 @@ export class ArchitecturePanel {
   private disposables: vscode.Disposable[] = [];
   private watcher: vscode.FileSystemWatcher | undefined;
   private busy = false;
+  private routeTraceCache: RouteTraceDataWire | null = null;
+  private routeAnalysisAbort: AbortController | undefined;
 
   private constructor(
     panel: vscode.WebviewPanel,
@@ -239,6 +250,19 @@ export class ArchitecturePanel {
         case 'node:select':
         case 'search:query':
         case 'filter:update':
+        case 'viewMode:set':
+          break;
+        case 'routeTrace:request':
+          await this.sendRouteTraceData();
+          break;
+        case 'runtimeTrace:refresh':
+          await this.sendRuntimeTraceList();
+          break;
+        case 'runtimeTrace:select':
+          await this.sendRuntimeTraceOverlay(
+            msg.payload.routeId,
+            msg.payload.traceId,
+          );
           break;
       }
     } catch (err) {
@@ -250,6 +274,136 @@ export class ArchitecturePanel {
         },
       });
     }
+  }
+
+  async openRouteTrace(): Promise<void> {
+    await this.sendRouteTraceData();
+  }
+
+  private async sendRouteTraceData(): Promise<void> {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) {
+      this.bus.post({
+        type: 'error',
+        payload: {
+          message: 'No workspace folder open.',
+          scope: 'route-trace',
+        },
+      });
+      return;
+    }
+
+    try {
+      if (!this.routeTraceCache) {
+        this.bus.post({
+          type: 'progress',
+          payload: { message: 'Analyzing routes and call chains…', percent: 10 },
+        });
+        // Abort any previous in-flight route analysis; the newest request wins.
+        this.routeAnalysisAbort?.abort();
+        const controller = new AbortController();
+        this.routeAnalysisAbort = controller;
+        const service = new WorkspaceAnalysisService();
+        const result = await service.analyzeAsync(folders[0].uri.fsPath, {
+          includeCallChains: true,
+          signal: controller.signal,
+        });
+        if (this.routeAnalysisAbort === controller) {
+          this.routeAnalysisAbort = undefined;
+        }
+        this.routeTraceCache = {
+          routes: result.routes,
+          traces: result.routeTraces ?? [],
+          runtimeTraces: listRuntimeTraceSummaries(),
+        };
+      } else {
+        this.routeTraceCache = {
+          ...this.routeTraceCache,
+          runtimeTraces: listRuntimeTraceSummaries(),
+        };
+      }
+
+      this.bus.post({
+        type: 'routeTrace:data',
+        payload: this.routeTraceCache,
+      });
+      await this.sendRuntimeTraceList();
+      this.bus.post({
+        type: 'progress',
+        payload: { message: '', percent: 100 },
+      });
+    } catch (err) {
+      if (isAnalysisCancelledError(err)) {
+        // Superseded or panel disposed — nothing to report.
+        return;
+      }
+      this.bus.post({
+        type: 'error',
+        payload: {
+          message: err instanceof Error ? err.message : String(err),
+          scope: 'route-trace',
+        },
+      });
+    }
+  }
+
+  private async sendRuntimeTraceList(): Promise<void> {
+    this.bus.post({
+      type: 'runtimeTrace:list',
+      payload: {
+        runtimeTraces: listRuntimeTraceSummaries(),
+      },
+    });
+  }
+
+  private async sendRuntimeTraceOverlay(
+    routeId: string,
+    traceId: string,
+  ): Promise<void> {
+    try {
+      const runtimeTrace = getRuntimeTraceById(traceId);
+      if (!runtimeTrace) {
+        this.bus.post({
+          type: 'error',
+          payload: {
+            message: `Runtime trace not found: ${traceId}`,
+            scope: 'runtime-overlay',
+          },
+        });
+        return;
+      }
+
+      const staticTrace = this.findStaticTrace(routeId);
+      if (!staticTrace) {
+        this.bus.post({
+          type: 'error',
+          payload: {
+            message: `Static route trace not found for route: ${routeId}`,
+            scope: 'runtime-overlay',
+          },
+        });
+        return;
+      }
+
+      const overlay = buildTraceOverlay(staticTrace, runtimeTrace);
+      this.bus.post({
+        type: 'runtimeTrace:overlay',
+        payload: overlay,
+      });
+    } catch (err) {
+      this.bus.post({
+        type: 'error',
+        payload: {
+          message: err instanceof Error ? err.message : String(err),
+          scope: 'runtime-overlay',
+        },
+      });
+    }
+  }
+
+  private findStaticTrace(routeId: string): StaticRouteTrace | undefined {
+    const trace = this.routeTraceCache?.traces.find((t) => t.routeId === routeId);
+    return trace as StaticRouteTrace | undefined;
   }
 
   private getHtml(): string {
@@ -281,7 +435,9 @@ export class ArchitecturePanel {
 
   dispose(): void {
     ArchitecturePanel.current = undefined;
-    this.explorer.dispose();
+    this.routeAnalysisAbort?.abort();
+    this.routeAnalysisAbort = undefined;
+    void this.explorer.dispose();
     void this.pool.dispose();
     this.panel.dispose();
     while (this.disposables.length) {

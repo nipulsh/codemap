@@ -10,6 +10,14 @@ export interface ArchitectureNodeData {
   cycle?: boolean;
   expanded?: boolean;
   lazy?: boolean;
+  traceDepth?: number;
+  traceResolution?: 'resolved' | 'unresolved' | 'external';
+  relativePath?: string;
+  staticTrace?: boolean;
+  overlayObservation?: 'observed' | 'unobserved' | 'runtime-only' | 'unresolved';
+  overlayMetricsLabel?: string;
+  overlayError?: { name?: string; message: string };
+  runtimeOnly?: boolean;
   [key: string]: unknown;
 }
 
@@ -22,6 +30,7 @@ const ICONS: Record<string, string> = {
   Interface: 'I',
   Enum: 'E',
   Component: 'R',
+  Route: '⇢',
 };
 
 function NodeShell({
@@ -32,15 +41,71 @@ function NodeShell({
   className: string;
 }) {
   const icon = ICONS[data.kind] ?? '?';
+  const depthLabel =
+    data.traceDepth !== undefined && data.traceDepth >= 0
+      ? `D${data.traceDepth}`
+      : null;
+  const resolutionLabel =
+    data.traceResolution === 'external'
+      ? '[external]'
+      : data.traceResolution === 'unresolved'
+        ? '[unresolved]'
+        : null;
+
+  const overlayLabel =
+    data.overlayObservation === 'observed'
+      ? '✓ observed'
+      : data.overlayObservation === 'unobserved'
+        ? '○ not observed'
+        : data.overlayObservation === 'runtime-only'
+          ? '⚡ runtime-only'
+          : data.overlayObservation === 'unresolved'
+            ? '⚠ unresolved'
+            : null;
+
+  const isTraceNode = !!data.staticTrace || data.kind === 'Route';
+  const overlayClass = data.overlayObservation
+    ? `cm-overlay-${data.overlayObservation}`
+    : '';
+
   return (
     <div
-      className={`cm-node ${className} ${data.cycle ? 'cm-cycle' : ''} ${data.expanded ? 'cm-expanded' : ''} ${data.lazy ? 'cm-lazy' : ''}`}
+      className={`cm-node ${className} ${data.cycle ? 'cm-cycle' : ''} ${data.expanded ? 'cm-expanded' : ''} ${data.lazy ? 'cm-lazy' : ''} ${data.traceResolution === 'external' ? 'cm-trace-external' : ''} ${overlayClass} ${data.runtimeOnly ? 'cm-runtime-only-node' : ''}`}
     >
-      <Handle type="target" position={Position.Left} />
+      <Handle
+        type="target"
+        position={isTraceNode ? Position.Top : Position.Left}
+      />
+      {depthLabel ? (
+        <span className="cm-node-depth" title={`Depth ${data.traceDepth}`}>
+          {depthLabel}
+        </span>
+      ) : null}
       <span className="cm-node-icon" aria-hidden>
         {icon}
       </span>
       <span className="cm-node-label">{data.label}</span>
+      {data.relativePath ? (
+        <span className="cm-node-sub">{data.relativePath}</span>
+      ) : null}
+      {resolutionLabel ? (
+        <span className="cm-node-badge cm-node-resolution">{resolutionLabel}</span>
+      ) : null}
+      {overlayLabel ? (
+        <span className="cm-node-badge cm-node-overlay" title={overlayLabel}>
+          {overlayLabel}
+        </span>
+      ) : null}
+      {data.overlayMetricsLabel ? (
+        <span className="cm-node-badge cm-node-metrics" title="Runtime metrics">
+          {data.overlayMetricsLabel}
+        </span>
+      ) : null}
+      {data.overlayError ? (
+        <span className="cm-node-badge cm-node-error" title={data.overlayError.message}>
+          ✕ {data.overlayError.name ?? 'Error'}
+        </span>
+      ) : null}
       {data.expanded ? (
         <span className="cm-node-badge" title="Expanded">
           ▾
@@ -54,7 +119,10 @@ function NodeShell({
           ▸
         </span>
       ) : null}
-      <Handle type="source" position={Position.Right} />
+      <Handle
+        type="source"
+        position={isTraceNode ? Position.Bottom : Position.Right}
+      />
     </div>
   );
 }
@@ -91,6 +159,10 @@ export function ComponentNode({ data }: NodeProps & { data: ArchitectureNodeData
   return <NodeShell data={data} className="cm-component" />;
 }
 
+export function RouteNode({ data }: NodeProps & { data: ArchitectureNodeData }) {
+  return <NodeShell data={data} className="cm-route" />;
+}
+
 export function kindToNodeType(kind: NodeKind): string {
   switch (kind) {
     case 'Workspace':
@@ -109,6 +181,8 @@ export function kindToNodeType(kind: NodeKind): string {
       return 'enum';
     case 'Component':
       return 'component';
+    case 'Route':
+      return 'route';
     default:
       return 'file';
   }

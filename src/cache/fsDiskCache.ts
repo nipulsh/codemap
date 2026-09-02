@@ -33,22 +33,26 @@ export class FileSystemDiskCache implements DiskCache {
       const files = await fs.readdir(this.cacheDir);
 
       for (const file of files) {
-        if (!file.endsWith('.json')) continue;
+        if (!file.endsWith('.json')) {
+          continue;
+        }
 
         try {
           const filePath = join(this.cacheDir, file);
           const content = await fs.readFile(filePath, 'utf8');
-          const parsed = JSON.parse(content);
+          const parsed: unknown = JSON.parse(content);
 
           // Extract the original key from the filename (without .json extension)
           const key = file.slice(0, -5); // Remove .json
 
-          // Basic validation - check if it's not expired
+          // Envelope validation — malformed entries are treated like corrupt ones
           if (this.isValid(parsed)) {
             this.memoryCache.set(key, {
               data: parsed.data,
               timestamp: Date.now()
             });
+          } else {
+            throw new Error('Malformed or expired cache envelope');
           }
         } catch (err) {
           // Log corrupted cache files but continue processing others
@@ -76,7 +80,9 @@ export class FileSystemDiskCache implements DiskCache {
 
       const savePromises = Array.from(this.dirtyKeys).map(async (key) => {
         const entry = this.memoryCache.get(key);
-        if (!entry) return;
+        if (!entry) {
+          return;
+        }
 
         try {
           const filePath = join(this.cacheDir, `${key}.json`);
@@ -178,34 +184,58 @@ export class FileSystemDiskCache implements DiskCache {
   }
 
   /**
-   * Check if a cached entry is still valid (not expired).
+   * Check if a cached entry has the expected envelope shape and is not expired.
+   * Accepts unknown input because entries read from disk may be arbitrary JSON.
    */
-  private isValid(entry: { data: unknown; timestamp: number }): boolean {
-    return (Date.now() - entry.timestamp) < this.ttlMs;
+  private isValid(entry: unknown): entry is { data: unknown; timestamp: number } {
+    if (typeof entry !== 'object' || entry === null) {
+      return false;
+    }
+    const { timestamp } = entry as { timestamp?: unknown };
+    if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) {
+      return false;
+    }
+    return (Date.now() - timestamp) < this.ttlMs;
   }
 
   /**
    * Load a specific cache entry from disk into memory.
+   * Corrupt or malformed files are deleted so they are not re-read on every get().
    */
   private async loadEntryFromDisk(key: string): Promise<void> {
+    const filePath = join(this.cacheDir, `${key}.json`);
+    let content: string;
     try {
-      const filePath = join(this.cacheDir, `${key}.json`);
-      await fs.access(filePath); // Check if file exists
+      content = await fs.readFile(filePath, 'utf8');
+    } catch {
+      // Missing file or unreadable (permissions) — treat as a miss.
+      return;
+    }
 
-      const content = await fs.readFile(filePath, 'utf8');
-      const parsed = JSON.parse(content);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      await this.removeQuietly(filePath);
+      return;
+    }
 
-      if (this.isValid(parsed)) {
-        this.memoryCache.set(key, {
-          data: parsed.data,
-          timestamp: Date.now()
-        });
-      } else {
-        // Remove expired entry
-        await fs.unlink(filePath);
-      }
-    } catch (err) {
-      // File doesn't exist or other error - ignore
+    if (this.isValid(parsed)) {
+      this.memoryCache.set(key, {
+        data: parsed.data,
+        timestamp: Date.now()
+      });
+    } else {
+      // Expired or malformed envelope
+      await this.removeQuietly(filePath);
+    }
+  }
+
+  private async removeQuietly(filePath: string): Promise<void> {
+    try {
+      await fs.unlink(filePath);
+    } catch {
+      // Ignore: read-only location or already gone
     }
   }
 }
