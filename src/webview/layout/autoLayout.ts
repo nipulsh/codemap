@@ -1,4 +1,5 @@
-import type { GraphEdge, GraphNode, GraphSnapshot } from '../../../shared/graph';
+import type { GraphEdge, GraphNode, GraphSnapshot, NodeKind } from '../../../shared/graph';
+import { getNodeDimensions, type NodeSize } from './nodeSizes';
 
 export interface PositionedNode extends GraphNode {
   position: { x: number; y: number };
@@ -12,20 +13,19 @@ export interface LayoutResult {
   engine: 'elk' | 'dagre' | 'incremental';
 }
 
-const NODE_SIZES: Record<string, { width: number; height: number }> = {
-  Workspace: { width: 200, height: 52 },
-  Folder: { width: 180, height: 48 },
-  File: { width: 160, height: 40 },
-  Function: { width: 150, height: 36 },
-  Class: { width: 150, height: 36 },
-  Interface: { width: 150, height: 36 },
-  Enum: { width: 140, height: 36 },
-  Component: { width: 160, height: 36 },
-  Route: { width: 200, height: 44 },
-};
+let currentNodeSize: NodeSize = 'medium';
 
-export function nodeSize(kind: string): { width: number; height: number } {
-  return NODE_SIZES[kind] ?? { width: 150, height: 36 };
+export function setNodeSizePreference(size: NodeSize): void {
+  currentNodeSize = size;
+}
+
+export function getNodeSizePreference(): NodeSize {
+  return currentNodeSize;
+}
+
+export function nodeSize(kind: string, size?: NodeSize): { width: number; height: number } {
+  const effectiveSize = size ?? currentNodeSize;
+  return getNodeDimensions(kind as NodeKind, effectiveSize);
 }
 
 /** Edges that define the explorer tree; imports/calls are drawn but must not drive layout. */
@@ -59,7 +59,9 @@ function kindFromNodeId(nodeId: string): string {
 function layoutHierarchyTree(
   nodes: GraphNode[],
   edges: GraphEdge[],
+  size?: NodeSize,
 ): LayoutResult {
+  const effectiveSize = size ?? currentNodeSize;
   const treeEdges = hierarchyLayoutEdges(edges);
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const parentOf = new Map<string, string>();
@@ -72,7 +74,7 @@ function layoutHierarchyTree(
   }
 
   const roots = nodes.filter((n) => !parentOf.has(n.id));
-  const positions = layoutNewNodes(new Map(), nodes, treeEdges);
+  const positions = layoutNewNodes(new Map(), nodes, treeEdges, undefined, effectiveSize);
 
   // Roots with no parent edge still need a seed position.
   let rootY = 0;
@@ -84,12 +86,12 @@ function layoutHierarchyTree(
   }
 
   const positioned = nodes.map((n) => {
-    const size = nodeSize(n.kind ?? kindFromNodeId(n.id));
+    const dim = nodeSize(n.kind ?? kindFromNodeId(n.id), effectiveSize);
     return {
       ...n,
       position: positions.get(n.id) ?? { x: 0, y: 0 },
-      width: size.width,
-      height: size.height,
+      width: dim.width,
+      height: dim.height,
     };
   });
 
@@ -105,9 +107,11 @@ function layoutHierarchyTree(
  */
 export async function layoutGraph(
   snapshot: GraphSnapshot,
+  size?: NodeSize,
 ): Promise<LayoutResult> {
   const nodes = snapshot.nodes;
   const edges = snapshot.edges;
+  const effectiveSize = size ?? currentNodeSize;
 
   if (nodes.length === 0) {
     return { nodes: [], edges: [], engine: 'elk' };
@@ -115,16 +119,16 @@ export async function layoutGraph(
 
   const treeEdges = hierarchyLayoutEdges(edges);
   if (nodes.length > ELK_MAX_NODES || treeEdges.length > ELK_MAX_TREE_EDGES) {
-    return layoutHierarchyTree(nodes, edges);
+    return layoutHierarchyTree(nodes, edges, effectiveSize);
   }
 
   try {
-    return await layoutWithElk(nodes, treeEdges);
+    return await layoutWithElk(nodes, treeEdges, effectiveSize);
   } catch {
     try {
-      return layoutWithDagre(nodes, treeEdges);
+      return layoutWithDagre(nodes, treeEdges, effectiveSize);
     } catch {
-      return layoutHierarchyTree(nodes, edges);
+      return layoutHierarchyTree(nodes, edges, effectiveSize);
     }
   }
 }
@@ -137,7 +141,9 @@ export function layoutNewNodes(
   newNodes: GraphNode[],
   edges: GraphEdge[],
   parentHint?: string,
+  size?: NodeSize,
 ): Map<string, { x: number; y: number }> {
+  const effectiveSize = size ?? currentNodeSize;
   const positions = new Map(existingPositions);
   if (newNodes.length === 0) {
     return positions;
@@ -175,7 +181,7 @@ export function layoutNewNodes(
 
   for (const [parentId, children] of byParent) {
     const parentPos = positions.get(parentId) ?? { x: 0, y: 0 };
-    const parentSize = nodeSize(
+    const parentDim = nodeSize(
       // approximate
       parentId.startsWith('workspace:')
         ? 'Workspace'
@@ -184,9 +190,10 @@ export function layoutNewNodes(
           : parentId.startsWith('file:')
             ? 'File'
             : 'Function',
+      effectiveSize,
     );
 
-    const startX = parentPos.x + parentSize.width + GAP_X * 0.6;
+    const startX = parentPos.x + parentDim.width + GAP_X * 0.6;
     let startY = parentPos.y;
 
     // Offset if siblings already occupy space
@@ -225,7 +232,9 @@ export function layoutNewNodes(
 async function layoutWithElk(
   nodes: GraphNode[],
   edges: GraphEdge[],
+  size?: NodeSize,
 ): Promise<LayoutResult> {
+  const effectiveSize = size ?? currentNodeSize;
   const ELK = (await import('elkjs/lib/elk.bundled.js')).default;
   const elk = new ELK();
 
@@ -238,8 +247,8 @@ async function layoutWithElk(
       'elk.layered.spacing.nodeNodeBetweenLayers': '60',
     },
     children: nodes.map((n) => {
-      const size = nodeSize(n.kind);
-      return { id: n.id, width: size.width, height: size.height };
+      const dim = nodeSize(n.kind, effectiveSize);
+      return { id: n.id, width: dim.width, height: dim.height };
     }),
     edges: edges.map((e) => ({
       id: e.id,
@@ -259,12 +268,12 @@ async function layoutWithElk(
 
   const positioned = nodes.map((n) => {
     const child = laidById.get(n.id);
-    const size = nodeSize(n.kind);
+    const dim = nodeSize(n.kind, effectiveSize);
     return {
       ...n,
       position: { x: child?.x ?? 0, y: child?.y ?? 0 },
-      width: size.width,
-      height: size.height,
+      width: dim.width,
+      height: dim.height,
     };
   });
 
@@ -274,7 +283,9 @@ async function layoutWithElk(
 async function layoutWithDagre(
   nodes: GraphNode[],
   edges: GraphEdge[],
+  size?: NodeSize,
 ): Promise<LayoutResult> {
+  const effectiveSize = size ?? currentNodeSize;
   // @dagrejs/dagre is CommonJS. esbuild's __toESM interop exposes its members
   // directly on the namespace, but Node's native ESM loader only guarantees
   // them on `default`; accept both so the fallback works everywhere.
@@ -287,8 +298,8 @@ async function layoutWithDagre(
   g.setGraph({ rankdir: 'LR', nodesep: 40, ranksep: 60 });
 
   for (const n of nodes) {
-    const size = nodeSize(n.kind);
-    g.setNode(n.id, { width: size.width, height: size.height });
+    const dim = nodeSize(n.kind, effectiveSize);
+    g.setNode(n.id, { width: dim.width, height: dim.height });
   }
 
   for (const e of edges) {
@@ -299,15 +310,15 @@ async function layoutWithDagre(
 
   const positioned = nodes.map((n) => {
     const gn = g.node(n.id);
-    const size = nodeSize(n.kind);
+    const dim = nodeSize(n.kind, effectiveSize);
     return {
       ...n,
       position: {
         x: (gn?.x ?? 0) - (gn?.width ?? 0) / 2,
         y: (gn?.y ?? 0) - (gn?.height ?? 0) / 2,
       },
-      width: size.width,
-      height: size.height,
+      width: dim.width,
+      height: dim.height,
     };
   });
 
