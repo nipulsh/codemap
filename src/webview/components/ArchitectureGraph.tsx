@@ -14,6 +14,9 @@ import {
 } from '@xyflow/react';
 import type { GraphPatch, GraphSnapshot } from '../../../shared/graph';
 import { layoutGraph, layoutNewNodes, nodeSize } from '../layout/autoLayout';
+import type { NodeSize } from '../layout/nodeSizes';
+import { filterEdges, filterNodes, type EdgeFilter } from '../edgeFilter';
+import { applySearchToNodes } from '../nodeSearch';
 import {
   ClassNode,
   ComponentNode,
@@ -52,6 +55,9 @@ interface Props {
   overlayMode?: boolean;
   traceLayout?: { nodes: TraceLayoutNode[]; edges: GraphSnapshot['edges'] } | null;
   onNodeSelect?: (nodeId: string) => void;
+  nodeSize?: NodeSize;
+  edgeFilter?: EdgeFilter;
+  searchQuery?: string;
 }
 
 function ArchitectureGraphInner({
@@ -64,17 +70,21 @@ function ArchitectureGraphInner({
   overlayMode = false,
   traceLayout = null,
   onNodeSelect,
+  nodeSize: nodeSizeProp = 'medium',
+  edgeFilter = 'all',
+  searchQuery = '',
 }: Props) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [layoutNodes, setLayoutNodes, onNodesChange] = useNodesState<Node>([]);
+  const [layoutEdges, setLayoutEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const positionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const nodesRef = useRef<Node[]>([]);
   const layoutFullVersionRef = useRef(-1);
   const { fitView } = useReactFlow();
 
   useEffect(() => {
-    nodesRef.current = nodes;
-  }, [nodes]);
+    nodesRef.current = layoutNodes;
+  }, [layoutNodes]);
 
   const toRfNode = useCallback((n: {
     id: string;
@@ -163,8 +173,8 @@ function ArchitectureGraphInner({
         pos.set(n.id, n.position);
       }
       positionsRef.current = pos;
-      setNodes(traceLayout.nodes.map(toRfNode));
-      setEdges(toRfEdges(traceLayout.edges));
+      setLayoutNodes(traceLayout.nodes.map(toRfNode));
+      setLayoutEdges(toRfEdges(traceLayout.edges));
       layoutFullVersionRef.current = fullVersion;
       requestAnimationFrame(() => {
         void fitView({ padding: 0.2, duration: 200 });
@@ -178,8 +188,8 @@ function ArchitectureGraphInner({
     traceLayout,
     fullVersion,
     onLayoutEngine,
-    setNodes,
-    setEdges,
+    setLayoutNodes,
+    setLayoutEdges,
     toRfNode,
     toRfEdges,
     fitView,
@@ -196,7 +206,7 @@ function ArchitectureGraphInner({
     let cancelled = false;
 
     void (async () => {
-      const result = await layoutGraph(snapshot);
+      const result = await layoutGraph(snapshot, nodeSizeProp);
       if (cancelled) {
         return;
       }
@@ -206,8 +216,8 @@ function ArchitectureGraphInner({
         pos.set(n.id, n.position);
       }
       positionsRef.current = pos;
-      setNodes(result.nodes.map(toRfNode));
-      setEdges(toRfEdges(result.edges));
+      setLayoutNodes(result.nodes.map(toRfNode));
+      setLayoutEdges(toRfEdges(result.edges));
       layoutFullVersionRef.current = fullVersion;
       requestAnimationFrame(() => {
         void fitView({ padding: 0.15, duration: 200 });
@@ -220,9 +230,10 @@ function ArchitectureGraphInner({
   }, [
     fullVersion,
     snapshot,
+    nodeSizeProp,
     onLayoutEngine,
-    setNodes,
-    setEdges,
+    setLayoutNodes,
+    setLayoutEdges,
     toRfNode,
     toRfEdges,
     fitView,
@@ -249,6 +260,8 @@ function ArchitectureGraphInner({
       positionsRef.current,
       newNodes,
       snapshot.edges,
+      undefined,
+      nodeSizeProp,
     );
 
     for (const id of lastPatch.removeNodeIds ?? []) {
@@ -265,30 +278,107 @@ function ArchitectureGraphInner({
     positionsRef.current = updatedPositions;
 
     const rfNodes: Node[] = snapshot.nodes.map((n) => {
-      const size = nodeSize(n.kind);
+      const dim = nodeSize(n.kind, nodeSizeProp);
       const position = updatedPositions.get(n.id) ?? { x: 0, y: 0 };
       return toRfNode({
         ...n,
         position,
-        width: size.width,
-        height: size.height,
+        width: dim.width,
+        height: dim.height,
       });
     });
 
-    setNodes(rfNodes);
-    setEdges(toRfEdges(snapshot.edges));
+    setLayoutNodes(rfNodes);
+    setLayoutEdges(toRfEdges(snapshot.edges));
     clearLastPatch?.();
   }, [
     lastPatch,
     fullVersion,
     snapshot,
-    setNodes,
-    setEdges,
+    nodeSizeProp,
+    setLayoutNodes,
+    setLayoutEdges,
     toRfNode,
     toRfEdges,
     clearLastPatch,
     traceMode,
   ]);
+
+  const onNodeMouseEnter = useCallback((_: React.MouseEvent, node: Node) => {
+    setHoveredNodeId(node.id);
+  }, []);
+
+  const onNodeMouseLeave = useCallback(() => {
+    setHoveredNodeId(null);
+  }, []);
+
+  const visibleEdges = useMemo(() => {
+    if (traceMode) {
+      return layoutEdges;
+    }
+    return filterEdges(layoutEdges, edgeFilter);
+  }, [layoutEdges, edgeFilter, traceMode]);
+
+  const visibleNodes = useMemo(() => {
+    if (traceMode) {
+      return layoutNodes;
+    }
+    return filterNodes(layoutNodes, visibleEdges, edgeFilter);
+  }, [layoutNodes, visibleEdges, edgeFilter, traceMode]);
+
+  const hoveredNodes = useMemo(() => {
+    if (!hoveredNodeId || traceMode) {
+      return visibleNodes;
+    }
+
+    const neighborIds = new Set<string>();
+    for (const edge of visibleEdges) {
+      if (edge.source === hoveredNodeId) {
+        neighborIds.add(edge.target);
+      } else if (edge.target === hoveredNodeId) {
+        neighborIds.add(edge.source);
+      }
+    }
+
+    return visibleNodes.map((node) => {
+      if (node.id === hoveredNodeId) {
+        const className = node.className
+          ? `${node.className} cm-hovered`
+          : 'cm-hovered';
+        return { ...node, className };
+      }
+      if (neighborIds.has(node.id)) {
+        const className = node.className
+          ? `${node.className} cm-neighbor`
+          : 'cm-neighbor';
+        return { ...node, className };
+      }
+      return node;
+    });
+  }, [visibleNodes, visibleEdges, hoveredNodeId, traceMode]);
+
+  const nodes = useMemo(() => {
+    if (traceMode) {
+      return hoveredNodes;
+    }
+    return applySearchToNodes(hoveredNodes, searchQuery);
+  }, [hoveredNodes, searchQuery, traceMode]);
+
+  const edges = useMemo(() => {
+    if (!hoveredNodeId || traceMode) {
+      return visibleEdges;
+    }
+
+    return visibleEdges.map((edge) => {
+      if (edge.source !== hoveredNodeId && edge.target !== hoveredNodeId) {
+        return edge;
+      }
+      const className = edge.className
+        ? `${edge.className} cm-edge-highlighted`
+        : 'cm-edge-highlighted';
+      return { ...edge, className };
+    });
+  }, [visibleEdges, hoveredNodeId, traceMode]);
 
   const onNodeDoubleClick = useCallback(
     (event: React.MouseEvent, node: Node) => {
@@ -405,6 +495,8 @@ function ArchitectureGraphInner({
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
         onNodeDoubleClick={onNodeDoubleClick}
         onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
